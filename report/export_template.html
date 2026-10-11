@@ -1,0 +1,730 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>XRPL 24h Export</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;600;700&display=swap">
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f5f7f6; --surface: #fcfdfc; --sunk: #edf1ef;
+    --ink: #0f1d1a; --ink-2: #44524e; --muted: #7a8783;
+    --grid: #dfe5e2; --axis: #c2ccc8; --border: rgba(15,29,26,0.11); --track: #e3e9e6;
+    --s1: #0b7a68; --s2: #c4572c; --s1-soft: #8fcabd; --accent-ink: #075e50;
+    --good: #16935b; --good-ink: #0c6b41; --warn: #d99a0b; --warn-ink: #8a5f00; --crit: #cc3b3b;
+    --display: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+    --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --page: #0d1412; --surface: #141d1a; --sunk: #101816;
+      --ink: #e6eeeb; --ink-2: #b3c0bb; --muted: #83918c;
+      --grid: #25302c; --axis: #34413c; --border: rgba(230,238,235,0.10); --track: #223029;
+      --s1: #35b89f; --s2: #e07a4f; --s1-soft: #1d5f53; --accent-ink: #6fd6c1;
+      --good: #2fbf7a; --good-ink: #5fd79b; --warn: #e8b23a; --warn-ink: #f0c666; --crit: #e36161;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #0d1412; --surface: #141d1a; --sunk: #101816;
+    --ink: #e6eeeb; --ink-2: #b3c0bb; --muted: #83918c;
+    --grid: #25302c; --axis: #34413c; --border: rgba(230,238,235,0.10); --track: #223029;
+    --s1: #35b89f; --s2: #e07a4f; --s1-soft: #1d5f53; --accent-ink: #6fd6c1;
+    --good: #2fbf7a; --good-ink: #5fd79b; --warn: #e8b23a; --warn-ink: #f0c666; --crit: #e36161;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.55 var(--body); }
+  main { max-width: 1120px; margin: 0 auto; padding: 28px 16px 72px; display: grid; gap: 20px; }
+  h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; }
+  h1 { font-size: 1.75rem; font-weight: 600; letter-spacing: -0.005em; line-height: 1.15; }
+  h2 { font-size: 1.12rem; font-weight: 600; }
+  .sub { font-size: 13px; color: var(--ink-2); margin: 2px 0 12px; max-width: 72ch; }
+  .meta { font-size: 12px; color: var(--muted); }
+  code, .mono { font-family: var(--mono); font-size: 12px; }
+  .eyebrow { font: 600 11px/1.4 var(--body); text-transform: uppercase; letter-spacing: .09em; color: var(--muted); }
+  .num { font-family: var(--display); font-variant-numeric: tabular-nums; }
+
+  /* Header */
+  .top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 12px 24px; }
+  .top .left { display: grid; gap: 4px; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px; white-space: nowrap;
+          font-size: 12px; font-weight: 600; border: 1px solid var(--border); background: var(--surface); color: var(--ink); }
+  .pill .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .pill.live .dot { animation: pulse 2s ease-in-out infinite; }
+  .updated b { color: var(--ink); font-weight: 600; }
+  .updated.stale b { color: var(--warn-ink); }
+  @keyframes pulse { 50% { opacity: .35; } }
+  @media (prefers-reduced-motion: reduce) { .pill.live .dot { animation: none; } }
+
+  /* Section rhythm: a labelled group, then its content */
+  .group { display: grid; gap: 12px; padding-top: 18px; border-top: 1px solid var(--grid); }
+  .group > header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 18px; min-width: 0; }
+
+  /* Goal: the one emphasised block */
+  .goal { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 22px 22px 18px;
+          display: grid; gap: 18px; }
+  .goal-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 32px; align-items: end; }
+  @media (max-width: 720px) { .goal-head { grid-template-columns: 1fr; } }
+  .goal-title { font: 600 1.45rem/1.2 var(--display); text-wrap: balance; margin: 4px 0 6px; }
+  .goal-why { font-size: 13.5px; color: var(--ink-2); max-width: 64ch; margin: 0; }
+  .goal-pct { text-align: right; }
+  @media (max-width: 720px) { .goal-pct { text-align: left; } }
+  .goal-pct .big { font: 600 3rem/1 var(--display); font-variant-numeric: tabular-nums; color: var(--accent-ink); }
+  .goal-pct .meta { display: block; margin-top: 4px; }
+
+  .timeline { display: grid; gap: 6px; }
+  .tl-track { position: relative; height: 18px; background: var(--track); border-radius: 4px; overflow: hidden; }
+  .tl-fill { position: absolute; top: 0; bottom: 0; right: 0; background: var(--s1); }
+  .tl-fill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--accent-ink); }
+  .tl-ticks { position: relative; height: 16px; font: 11px/1 var(--body); color: var(--muted); font-variant-numeric: tabular-nums; }
+  .tl-ticks span { position: absolute; top: 2px; transform: translateX(-50%); white-space: nowrap; }
+  .tl-ticks span.edge-l { transform: none; } .tl-ticks span.edge-r { transform: translateX(-100%); }
+  .tl-grid { position: absolute; inset: 0; }
+  .tl-grid i { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--page); opacity: .7; }
+  .tl-cap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px; font-size: 12.5px; color: var(--ink-2); }
+  .tl-cap b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  .pstats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; border-top: 1px solid var(--grid); padding-top: 14px; }
+  @media (max-width: 720px) { .pstats { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 14px; } }
+  .pstats > div { padding: 0 16px; border-left: 1px solid var(--grid); min-width: 0; }
+  .pstats > div:first-child { border-left: 0; padding-left: 0; }
+  @media (max-width: 720px) { .pstats > div:nth-child(3) { border-left: 0; padding-left: 0; } }
+  .pstats .k { font-size: 12px; color: var(--ink-2); }
+  .pstats .v { font: 600 1.3rem/1.3 var(--display); font-variant-numeric: tabular-nums; }
+  .pstats .s { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  .ladder { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; list-style: none; margin: 0; padding: 0; }
+  @media (max-width: 720px) { .ladder { grid-template-columns: 1fr; } }
+  .ladder li { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; align-items: start; padding: 10px 12px;
+               background: var(--sunk); border-radius: 6px; }
+  .ladder .mark { grid-row: span 2; width: 20px; height: 20px; border-radius: 50%; margin-top: 1px;
+                  display: grid; place-items: center; font: 700 11px/1 var(--body); }
+  .ladder .done .mark { background: var(--good); color: var(--surface); }
+  .ladder .now .mark { background: var(--s1); color: var(--surface); }
+  .ladder .next .mark { border: 1.5px dashed var(--axis); color: var(--muted); }
+  .ladder b { font-size: 13px; }
+  .ladder .d { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .ladder .st { font-weight: 600; }
+  .ladder .done .st { color: var(--good-ink); } .ladder .now .st { color: var(--accent-ink); }
+
+  /* Health strip */
+  .health { display: grid; grid-template-columns: 1.15fr 1fr 1fr; gap: 16px 28px; }
+  @media (max-width: 860px) { .health { grid-template-columns: 1fr; } }
+  .health h3 { font: 600 11px/1.4 var(--body); text-transform: uppercase; letter-spacing: .09em; color: var(--muted); margin: 0 0 8px; }
+  .alert { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 6px; font-size: 12.5px;
+           background: color-mix(in srgb, var(--warn) 14%, var(--surface)); color: var(--ink); border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent); }
+  .alert b { color: var(--warn-ink); }
+  .bar { height: 8px; background: var(--track); border-radius: 999px; overflow: hidden; }
+  .bar > div { height: 100%; background: var(--s1); border-radius: 999px; }
+  .meter { display: grid; gap: 4px; margin-bottom: 12px; }
+  .meter .lbl { display: flex; justify-content: space-between; gap: 8px; font-size: 12.5px; }
+  .meter .lbl span:last-child { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .meter .hint { font-size: 11.5px; color: var(--muted); }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 12.5px; margin: 8px 0 0; }
+  .kv dt { color: var(--ink-2); } .kv dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* Figures, charts, tables */
+  .figs { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 14px 0; }
+  .figs > div { padding: 2px 16px; border-left: 1px solid var(--grid); }
+  .figs .k { font-size: 12px; color: var(--ink-2); }
+  .figs .v { font: 600 1.4rem/1.3 var(--display); font-variant-numeric: tabular-nums; }
+  .figs .s { font-size: 11.5px; color: var(--muted); }
+  .row { display: grid; grid-template-columns: 1.3fr 1fr; gap: 16px; }
+  @media (max-width: 780px) { .row { grid-template-columns: 1fr; } }
+  .legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 12px; color: var(--ink-2); margin-bottom: 6px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+  .chart { position: relative; }
+  svg { display: block; width: 100%; height: auto; overflow: visible; }
+  svg text { fill: var(--muted); font: 11px var(--body); font-variant-numeric: tabular-nums; }
+  .tip { position: absolute; pointer-events: none; background: var(--surface); color: var(--ink); z-index: 2;
+         border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 12px;
+         box-shadow: 0 4px 16px rgba(0,0,0,.14); white-space: nowrap; transform: translate(-50%, calc(-100% - 10px)); }
+  .tip b { font-variant-numeric: tabular-nums; }
+  .scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+  th { color: var(--ink-2); font-weight: 600; }
+  td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
+  tfoot td { font-weight: 600; border-bottom: none; }
+  details summary { cursor: pointer; color: var(--ink-2); font-size: 12px; margin-top: 8px; }
+  details summary:focus-visible { outline: 2px solid var(--s1); outline-offset: 2px; }
+  pre { background: var(--sunk); border: 1px solid var(--border); border-radius: 6px; padding: 12px; overflow-x: auto; margin: 8px 0 0; }
+  .cal-wrap { overflow-x: auto; }
+  .cal-legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 12px; color: var(--ink-2); margin-top: 8px; }
+  .cal-legend i { display: inline-block; width: 11px; height: 11px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+  .note { font-size: 12px; color: var(--muted); margin: 8px 0 0; }
+
+  /* Tabs */
+  #app { display: grid; gap: 22px; }
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--grid); }
+  .tabs button { font: 600 13.5px var(--body); color: var(--ink-2); background: none; border: 0;
+                 border-bottom: 2px solid transparent; padding: 8px 12px; margin-bottom: -1px; cursor: pointer; }
+  .tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--s1); }
+  .tabs button:hover { color: var(--ink); }
+  .tabs button:focus-visible { outline: 2px solid var(--s1); outline-offset: -2px; border-radius: 4px; }
+
+  /* Spike report document */
+  .doc { display: grid; gap: 28px; }
+  .doc > header { display: grid; gap: 6px; }
+  .doc section { display: grid; gap: 10px; }
+  .doc h2 { font-size: 1.2rem; }
+  .doc h3 { font-size: .98rem; margin: 8px 0 0; }
+  .doc p, .doc li { max-width: 72ch; }
+  .doc p { margin: 0; }
+  .doc ul { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
+  .doc .lede { font-size: 15px; color: var(--ink-2); }
+  .doc table td { white-space: normal; vertical-align: top; }
+  .doc table td:first-child { white-space: nowrap; font-weight: 600; }
+  .tag { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px;
+         border: 1px solid var(--border); white-space: nowrap; }
+  .tag.m { color: var(--good-ink); } .tag.d { color: var(--ink-2); } .tag.s { color: var(--ink-2); font-style: italic; }
+  .qs { border-left: 3px solid var(--s1); padding: 4px 0 4px 14px; }
+</style>
+</head>
+<body>
+
+<main>
+  <nav class="tabs" role="tablist" aria-label="Report sections">
+    <button role="tab" id="tab-export" aria-controls="app" aria-selected="true">Export status</button>
+    <button role="tab" id="tab-spike" aria-controls="spike" aria-selected="false">Spike report</button>
+  </nav>
+  <div id="app" role="tabpanel" aria-labelledby="tab-export"></div>
+  <article id="spike" class="doc" role="tabpanel" aria-labelledby="tab-spike" hidden></article>
+</main>
+
+<script>
+const D = /*__DATA__*/null;
+(() => {
+  const fmt = (n, d = 0) => n == null ? '–' : Number(n).toLocaleString('en-US', { maximumFractionDigits: d, minimumFractionDigits: d });
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const short = (a) => a && a.length > 16 ? `${a.slice(0, 8)}…${a.slice(-6)}` : (a ?? '');
+  const utc = (iso) => iso ? iso.replace('T', ' ').replace(/(:\d\d)?Z$/, '') + ' UTC' : '–';
+  const T = D.totals, P = D.progress;
+  const total = P.total || T.ledgers, done = P.state === 'complete' ? total : (P.done ?? T.ledgers);
+  const pct = total ? 100 * done / total : 0;
+  const hours = (new Date(T.t1) - new Date(T.t0)) / 3.6e6;
+  const state = {
+    running: ['var(--s1)', 'Backfill running'],
+    complete: ['var(--good)', 'Export complete'],
+    stopped: ['var(--crit)', 'Backfill stopped'],
+    unknown: ['var(--muted)', 'Status unknown'],
+  }[P.state] || ['var(--muted)', P.state];
+  const sizeMB = D.files.reduce((a, f) => a + f.ledgers_mb + f.tx_mb, 0);
+  const S = D.system, N = S.node;
+  const dur = (s) => s >= 86400 ? `${Math.floor(s / 86400)} d ${Math.round(s % 86400 / 3600)} h`
+    : s >= 3600 ? `${Math.floor(s / 3600)} h ${Math.round(s % 3600 / 60)} min` : `${Math.max(1, Math.round(s / 60))} min`;
+  const when = (d) => d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' }) + ' UTC';
+  const etaS = P.state === 'running' && P.rate ? (total - done) / P.rate : null;
+  const DS = D.dataset || { ledgers: T.ledgers, txs: T.txs, files: D.files.length, bytes: 0 };
+  const bytes = (b) => b >= 1e12 ? `${fmt(b / 1e12, 1)} TB` : b >= 1e9 ? `${fmt(b / 1e9, 1)} GB` : `${fmt(b / 1e6, 0)} MB`;
+  function meter(label, pct, value, hint) {
+    const high = pct >= 85;
+    return `<div class="meter"><div class="lbl"><span>${label}</span><span>${high ? '<span aria-hidden="true">⚠</span> ' : ''}${value}</span></div>
+      <div class="bar" role="meter" aria-valuenow="${pct.toFixed(0)}" aria-valuemin="0" aria-valuemax="100"><div style="width:${Math.max(pct, 0.6)}%;background:${high ? 'var(--warn)' : 'var(--s1)'}"></div></div>
+      <div class="hint">${fmt(pct, 1)}% used${high ? ' (high)' : ''} · ${hint}</div></div>`;
+  }
+  const perDay = 86400 / (T.avg_close_s || 3.9);            // expected ledgers per UTC day
+  const bytesPerDay = T.ledgers ? sizeMB * 1e6 / T.ledgers * perDay : 0;
+  const dataDisk = S.disks.find(d => d.mount === '/local/data');
+  const covDays = D.coverage.filter(c => c.ledgers >= 0.95 * perDay).length;
+  const covNote = bytesPerDay && dataDisk
+    ? `${covDays} full and ${D.coverage.length - covDays} partial day(s) on disk. At about ${bytes(bytesPerDay)} per day of history, the ${bytes(dataDisk.free)} free on the research array holds roughly ${fmt(dataDisk.free / bytesPerDay / 365, 0)} years.`
+    : '';
+  const typeMax = D.types.length ? D.types[0].n : 1;
+
+  const G = D.goal || null;
+  const day = (d) => d.toLocaleString('en-US', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+  // Goal timeline: the backfill walks back in time, so coverage grows from the right-hand (newest) end.
+  let timeline = '', ladder = '';
+  if (G) {
+    const g0 = new Date(G.from), g1 = new Date(G.to), span = g1 - g0;
+    const oldest = DS.t0 ? new Date(Math.max(g0, Math.min(g1, new Date(DS.t0)))) : g1;
+    const covPct = 100 * (g1 - oldest) / span;
+    let ticks = '', grid = '';
+    for (let m = new Date(Date.UTC(g0.getUTCFullYear(), g0.getUTCMonth() + 1, 1)); m < g1; m.setUTCMonth(m.getUTCMonth() + 1)) {
+      const x = 100 * (m - g0) / span;
+      const label = m.getUTCMonth() === 0 ? String(m.getUTCFullYear()) : m.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' });
+      ticks += `<span style="left:${x}%">${label}</span>`;
+      grid += `<i style="left:${x}%"></i>`;
+    }
+    timeline = `
+      <div class="timeline" role="img" aria-label="History on disk: ${fmt(covPct, 1)}% of the 12-month window, back to ${day(oldest)}">
+        <div class="tl-track"><div class="tl-grid">${grid}</div><div class="tl-fill" style="width:${Math.max(covPct, 0.4)}%"></div></div>
+        <div class="tl-ticks" aria-hidden="true">${ticks}</div>
+        <div class="tl-cap"><span>Goal starts <b>${day(g0)}</b></span>
+          <span>On disk back to <b>${day(oldest)}</b></span><span>Ends <b>${day(g1)}</b></span></div>
+      </div>`;
+    const stepState = (m) => m.status === 'done' ? ['done', '✓', 'Done']
+      : m.status === 'planned' ? ['next', '', 'Planned']
+      : P.state === 'complete' ? ['done', '✓', 'Done']
+      : P.state === 'running' ? ['now', '', `In progress · ${fmt(pct, 1)}%`]
+      : ['now', '', P.state === 'stopped' ? 'Paused' : 'Not started'];
+    ladder = `<ol class="ladder" aria-label="Milestones">${G.milestones.map(m => {
+      const [cls, mark, st] = stepState(m);
+      return `<li class="${cls}"><span class="mark" aria-hidden="true">${mark}</span><b>${esc(m.name)}</b>
+        <span class="d"><span class="st">${st}</span> · ${esc(m.detail)}</span></li>`;
+    }).join('')}</ol>`;
+  }
+
+  document.getElementById('app').innerHTML = `
+    <header class="top">
+      <div class="left">
+        <span class="eyebrow">XRPL Open Data Project · ${esc(S.host)}</span>
+        <h1>XRPL mainnet history export</h1>
+        <span class="meta"><span id="updated" class="updated">Updated ${utc(D.generated_at)}</span> · sources: public full-history servers (Ripple s1/s2, honeycluster.io, Ankr, xrplcluster.com, xrpl.link)</span>
+      </div>
+      <span class="pill${P.state === 'running' ? ' live' : ''}"><span class="dot" style="background:${state[0]}"></span>${state[1]}</span>
+    </header>
+
+    <section class="goal" aria-label="Goal and progress">
+      <div class="goal-head">
+        <div>
+          <span class="eyebrow">Goal</span>
+          <p class="goal-title">${esc(G ? G.title : 'Export XRPL mainnet history')}</p>
+          ${G ? `<p class="goal-why">${esc(G.why)}</p>` : ''}
+        </div>
+        <div class="goal-pct"><span class="big">${fmt(pct, 1)}%</span>
+          <span class="meta">${fmt(done)} of ${fmt(total)} ledgers</span></div>
+      </div>
+      ${timeline}
+      <div class="pstats">
+        <div><div class="k">Speed</div><div class="v">${P.rate ? `${fmt(P.rate, 1)} ledgers/s` : '–'}</div>
+          <div class="s">${P.rate ? `~${fmt(P.rate * 86400 / 1e6, 2)}M ledgers per day` : 'no rate yet'}</div></div>
+        <div><div class="k">ETA</div><div class="v">${etaS != null ? dur(etaS) : P.state === 'complete' ? 'Done' : '–'}</div>
+          <div class="s">${etaS != null ? `finishes ~${when(new Date(new Date(D.generated_at).getTime() + etaS * 1e3))}` : P.state === 'stopped' ? 'exporter stopped' : ''}</div></div>
+        <div><div class="k">Next update</div><div class="v" id="next-in">–</div>
+          <div class="s" id="next-at"></div></div>
+        <div><div class="k">On disk</div><div class="v">${bytes(DS.bytes)}</div>
+          <div class="s">${fmt(DS.files)} files · ${fmt(DS.txs)} txs</div></div>
+      </div>
+      ${ladder}
+    </section>
+
+    <section class="group" aria-label="Server health">
+      <header><h2>Validator host</h2>
+        <span class="meta">${esc(S.cpu_model || '')} · ${S.cores} cores · ${fmt(S.mem_total / 2**30, 0)} GB RAM · up ${fmt(S.uptime_s / 86400, 1)} days</span></header>
+      <div class="health">
+        <div>
+          <h3>xrpld node</h3>
+          ${N.reachable ? `
+          <span class="pill"><span class="dot" style="background:${N.state === 'proposing' || N.state === 'full' ? 'var(--good)' : 'var(--warn)'}"></span>${esc(N.state)}</span>
+          <dl class="kv">
+            <dt>Version</dt><dd>${esc(N.version)}</dd>
+            <dt>Peers</dt><dd>${fmt(N.peers)}</dd>
+            <dt>Validated ledger</dt><dd class="mono">#${fmt(N.validated)}</dd>
+            <dt>Node uptime</dt><dd>${fmt(N.uptime_s / 3600, 1)} h</dd>
+            ${N.process ? `<dt>Memory (RSS)</dt><dd>${bytes(N.process.rss)}</dd>` : ''}
+            <dt>Exporter</dt><dd>${S.exporter_running ? 'running' : 'idle'}</dd>
+          </dl>
+          ${N.warnings.map(w => `<p class="alert"><span aria-hidden="true">⚠</span><span><b>Upgrade needed.</b> ${esc(w)}</span></p>`).join('')}`
+          : `<span class="pill"><span class="dot" style="background:var(--crit)"></span>Not reachable</span><p class="note">${esc(N.error || '')}</p>`}
+        </div>
+        <div>
+          <h3>Compute</h3>
+          ${meter('CPU', S.cpu_pct, `${fmt(S.cpu_pct, 0)}%`, `Load ${S.load.map(l => fmt(l, 2)).join(' · ')} (1, 5, 15 min)`)}
+          ${meter('Memory', 100 * (1 - S.mem_available / S.mem_total), `${fmt((S.mem_total - S.mem_available) / 2**30, 1)} / ${fmt(S.mem_total / 2**30, 0)} GB`, `${fmt(S.mem_available / 2**30, 1)} GB available`)}
+        </div>
+        <div>
+          <h3>Disks</h3>
+          ${S.disks.map(d => meter(`${esc(d.label)} <span class="meta">${esc(d.mount)}</span>`, 100 * (1 - d.free / d.total),
+              `${bytes(d.free)} free`, `${bytes(d.total)} · ${esc(d.media)}`)).join('')}
+        </div>
+      </div>
+    </section>
+
+    <section class="group" aria-label="Data on disk">
+      <header><h2>Days on disk, last 12 months</h2>
+        <span class="meta">Each square is one UTC day, coloured by the share of its ledgers stored in <code>/local/data/xrpl</code></span></header>
+      <div class="cal-wrap chart" id="c-cal"></div>
+      <div class="cal-legend">
+        <span><i style="background:var(--track)"></i>No data</span>
+        <span><i style="background:var(--s1-soft)"></i>Partial day</span>
+        <span><i style="background:var(--s1)"></i>Full day</span>
+      </div>
+      <p class="note">${covNote}</p>
+    </section>
+
+    <section class="group" aria-label="Last 24 hours">
+      <header><h2>The network in the latest 24 hours on disk</h2>
+        <span class="meta">${utc(T.t0)} – ${utc(T.t1)} · ledgers #${fmt(T.first_ledger)} – #${fmt(T.last_ledger)}</span></header>
+      <div class="figs">
+        ${[
+          ['Transactions', fmt(T.txs), `${fmt(T.txs / Math.max(T.ledgers, 1), 1)} per ledger`],
+          ['Throughput', `${fmt(T.txs / Math.max(hours * 3600, 1), 1)} tx/s`, `${fmt(T.avg_close_s, 2)} s per ledger`],
+          ['Success rate', `${fmt(100 * T.ok / Math.max(T.txs, 1), 1)}%`, 'tesSUCCESS'],
+          ['Active accounts', fmt(T.accounts), 'distinct senders'],
+          ['XRP delivered', fmt(T.xrp_delivered), 'native-XRP payments'],
+          ['XRP burned', fmt(T.burned_xrp, 2), 'from total supply change'],
+        ].map(([k, v, s]) => `<div><div class="k">${k}</div><div class="v">${v}</div><div class="s">${s}</div></div>`).join('')}
+      </div>
+
+      <div class="card">
+        <h2>Transactions per hour</h2>
+        <p class="sub">Outcome of every transaction, grouped by ledger close time (UTC). The first and last hours are partial.</p>
+        <div class="legend"><span><i style="background:var(--s1)"></i>Succeeded (tesSUCCESS)</span><span><i style="background:var(--s2)"></i>Included but failed (tec*)</span></div>
+        <div class="chart" id="c-hourly"></div>
+        <details><summary>Show as table</summary><div class="scroll"><table>
+          <thead><tr><th>Hour (UTC)</th><th class="n">Ledgers</th><th class="n">Transactions</th><th class="n">Succeeded</th><th class="n">Failed</th></tr></thead>
+          <tbody>${D.hourly.map(h => `<tr><td>${utc(h.hour)}</td><td class="n">${fmt(h.ledgers)}</td><td class="n">${fmt(h.txs)}</td><td class="n">${fmt(h.ok)}</td><td class="n">${fmt(h.txs - h.ok)}</td></tr>`).join('')}</tbody>
+        </table></div></details>
+      </div>
+
+      <div class="row">
+        <div class="card">
+          <h2>Transaction types</h2>
+          <p class="sub">Count by TransactionType. Hover a bar for its success rate.</p>
+          <div class="chart" id="c-types"></div>
+        </div>
+        <div class="card">
+          <h2>Result codes</h2>
+          <p class="sub">Failed tec* transactions are still recorded and still pay the fee.</p>
+          <div class="scroll"><table>
+            <thead><tr><th>Result</th><th class="n">Count</th><th class="n">Share</th></tr></thead>
+            <tbody>${D.results.map(r => `<tr><td class="mono">${esc(r.result)}</td><td class="n">${fmt(r.n)}</td><td class="n">${fmt(100 * r.n / T.txs, 1)}%</td></tr>`).join('')}</tbody>
+          </table></div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="card">
+          <h2>Most active accounts</h2>
+          <p class="sub">Top senders by transaction count. Mostly DEX market-making bots.</p>
+          <div class="scroll"><table>
+            <thead><tr><th>Account</th><th>Main type</th><th class="n">Txs</th><th class="n">Success</th></tr></thead>
+            <tbody>${D.top_accounts.map(a => `<tr><td class="mono" title="${esc(a.account)}">${esc(short(a.account))}</td><td>${esc(a.main_type)}</td><td class="n">${fmt(a.n)}</td><td class="n">${fmt(100 * a.ok / a.n, 0)}%</td></tr>`).join('')}</tbody>
+          </table></div>
+        </div>
+        <div class="card">
+          <h2>Issued-currency payments</h2>
+          <p class="sub">Successful payments that delivered a token instead of XRP.</p>
+          <div class="scroll"><table>
+            <thead><tr><th>Currency</th><th>Issuer</th><th class="n">Payments</th></tr></thead>
+            <tbody>${D.iou.map(r => `<tr><td>${esc(r.currency)}</td><td class="mono" title="${esc(r.issuer)}">${esc(short(r.issuer))}</td><td class="n">${fmt(r.n)}</td></tr>`).join('')}</tbody>
+          </table></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="group" aria-label="Files on disk">
+      <header><h2>Files on disk</h2>
+        <span class="meta">zstd Parquet under <code>/local/data/xrpl</code>, 1,000 ledgers per chunk</span></header>
+      <div class="card">
+        ${DS.files > D.files.length ? `<p class="sub">The ${D.files.length} most recent of ${fmt(DS.files)} chunks; the statistics above cover these chunks only.</p>` : ''}
+        <div class="scroll"><table>
+          <thead><tr><th>Chunk (ledger range)</th><th class="n">Transactions</th><th class="n">transactions/ MB</th><th class="n">ledgers/ MB</th></tr></thead>
+          <tbody>${D.files.map(f => `<tr><td class="mono">${esc(f.name.replace('.parquet', ''))}</td><td class="n">${fmt(D.chunk_txs[f.name])}</td><td class="n">${fmt(f.tx_mb, 1)}</td><td class="n">${fmt(f.ledgers_mb, 2)}</td></tr>`).join('')}</tbody>
+          <tfoot><tr><td>Total</td><td class="n">${fmt(T.txs)}</td><td class="n">${fmt(D.files.reduce((a, f) => a + f.tx_mb, 0), 0)}</td><td class="n">${fmt(D.files.reduce((a, f) => a + f.ledgers_mb, 0), 1)}</td></tr></tfoot>
+        </table></div>
+        <details><summary>How to query this data</summary>
+<pre><code>cd ~/xrpl-open-data-project
+uv run python -c "import duckdb; print(duckdb.sql(\\"
+  SELECT tx_type, count(*) n
+  FROM '/local/data/xrpl/transactions/*.parquet'
+  GROUP BY 1 ORDER BY n DESC\\"))"</code></pre>
+          <p class="note">Each transaction row also keeps the raw <code>tx_json</code> and <code>meta_json</code>, so no field is lost.</p>
+        </details>
+      </div>
+    </section>`;
+
+
+  // ---------- Spike report tab ----------
+  const rl = D.iou[0], rl2 = D.iou[1];
+  const failPct = 100 * (1 - T.ok / Math.max(T.txs, 1));
+  const topFails = D.results.filter(r => r.result !== 'tesSUCCESS').slice(0, 2).map(r => `<code>${esc(r.result)}</code>`).join(' and ');
+  const offers = D.types.filter(t => /^Offer/.test(t.type)).reduce((a, t) => a + t.n, 0);
+  const kbPerLedger = T.ledgers ? sizeMB * 1e3 / T.ledgers : 0;
+  const doneNote = P.state === 'complete' ? 'complete' : `${fmt(pct, 0)}% complete when this page was generated`;
+  document.getElementById('spike').innerHTML = `
+    <header>
+      <div class="eyebrow">Spike · 27–28 Sep 2026</div>
+      <h1>Can we host XRPL mainnet history ourselves?</h1>
+      <p class="lede">A time-boxed experiment to find out whether our own infrastructure can collect, store and serve
+        XRP Ledger mainnet data for outside researchers, and what stops us from keeping the full ledger locally.</p>
+    </header>
+
+    <section>
+      <h2>1. Experiment</h2>
+      <div class="qs">
+        <p><b>Question.</b> Using the machine that runs our validator, can we build an open research dataset of XRPL mainnet,
+          and could that machine hold the full ledger history?</p>
+      </div>
+      <h3>Setup</h3>
+      <ul>
+        <li><b>Machine:</b> ${esc(S.cpu_model || '')}, ${S.cores} cores, ${fmt(S.mem_total / 2**30, 0)} GB RAM.
+          Disks: 3.6 TB NVMe SSD (xrpld database), 18 TB RAID1 of two 20 TB HDDs (empty), 98 GB system disk.</li>
+        <li><b>Node:</b> xrpld ${esc(N.version || 'unknown')}, running as a proposing validator, configured with <code>online_delete=512</code>.</li>
+        <li><b>Tools:</b> a Bash + jq snapshot script against our node; a Python exporter (uv, httpx, PyArrow) that writes
+          zstd-compressed Parquet; DuckDB for analysis; this report, rebuilt hourly.</li>
+        <li><b>Data sources:</b> our node for live state; the public full-history servers <code>s2.ripple.com</code> and
+          <code>xrplcluster.com</code> for history, so the validator carries no extra load.</li>
+      </ul>
+      <h3>Steps</h3>
+      <ul>
+        <li>Took node snapshots of the latest 20 validated ledgers and published a first report.</li>
+        <li>Inspected the node's configuration, disks and memory to see what history we hold and could hold.</li>
+        <li>Exported the last 24 hours of ledgers, with every transaction and its metadata, to Parquet on the HDD array.</li>
+        <li>Sampled 96 ledgers across 2013–2025 to estimate the size of the full history.</li>
+        <li>Checked the findings against the official xrpl.org guidance on full history, capacity and validators.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>2. Facts</h2>
+      <h3>Data collected</h3>
+      <div class="scroll"><table>
+        <thead><tr><th>Dataset</th><th>Contents</th><th class="n">Size</th></tr></thead>
+        <tbody>
+          <tr><td>24 h export</td><td>Ledgers #${fmt(P.start)} – #${fmt(P.end)} (${fmt(P.total)} ledgers), ${doneNote}.
+            ${fmt(T.ledgers)} ledgers and ${fmt(T.txs)} transactions on disk so far, raw <code>tx_json</code> and <code>meta_json</code> included.</td>
+            <td class="n">${fmt(sizeMB, 0)} MB</td></tr>
+          <tr><td>Node snapshots</td><td>Three runs of the 20 latest validated ledgers from our node, as CSV and JSON.</td><td class="n">&lt; 5 MB</td></tr>
+          <tr><td>History sample</td><td>8 random ledgers at each of 12 points from ledger 1M (2013) to 100M (2025), transaction counts only.</td><td class="n">–</td></tr>
+          <tr><td>Infrastructure</td><td>Node config, disk layout, memory, CPU and node state, captured on every report build.</td><td class="n">–</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>Data analysed</h3>
+      <p>Transaction types, engine result codes, hourly throughput, most active accounts, issued-currency payments,
+        XRP burned versus fees paid, bytes stored per ledger and per transaction, fetch rate and throttling from the public servers,
+        and transactions per ledger across the chain's history.</p>
+
+      <h3>Observations</h3>
+      <ul>
+        <li><b>Load.</b> Mainnet carries about ${fmt(T.txs / Math.max(hours * 3600, 1), 1)} transactions per second,
+          ${fmt(T.txs / Math.max(T.ledgers, 1), 0)} per ledger, with a ledger closing every ${fmt(T.avg_close_s, 2)} s.</li>
+        <li><b>Failures are common.</b> ${fmt(failPct, 0)}% of included transactions fail, mostly ${topFails}.
+          They still pay fees and stay in the ledger.</li>
+        <li><b>The DEX dominates.</b> Offer transactions make up ${fmt(100 * offers / Math.max(T.txs, 1), 0)}% of all traffic,
+          and the most active accounts are market-making bots.</li>
+        ${rl ? `<li><b>${esc(rl.currency)} leads token payments</b>, with ${fmt(rl.n)} successful payments against ${fmt(rl2 ? rl2.n : 0)} for the next token (${esc(rl2 ? rl2.currency : '–')}).</li>` : ''}
+        <li><b>The export is complete and consistent.</b> The drop in total XRP supply (${fmt(T.burned_xrp, 3)} XRP burned)
+          matches the sum of fees paid (${fmt(T.fees_xrp, 3)} XRP). The small gap is the first ledger's own fees.</li>
+        <li><b>History grew steadily.</b> From about 1 transaction per ledger in 2013 to about 80 in 2024–2025 and about 120 today,
+          which puts the whole chain at roughly 5.3 billion transactions.</li>
+        <li><b>Parquet is compact.</b> ${fmt(kbPerLedger, 1)} KB per ledger, against about 450 KB per ledger in xrpld's own database
+          (4.5 TB per 10M ledgers, per xrpl.org). The full transaction history would be about 2.3 TB in Parquet.</li>
+        <li><b>Public servers are usable but throttled.</b> About ${fmt(P.rate || 10, 0)} ledgers/s, with ${fmt(P.retries)} throttled requests retried
+          so far, mostly from xrplcluster.com.</li>
+        <li><b>Our node keeps about 1,000 ledgers,</b> roughly an hour, because of <code>online_delete=512</code>.</li>
+        <li><b>The validator dropped out once.</b> It restarted during a package install and spent about 3 minutes out of consensus.</li>
+        <li><b>An upgrade is due.</b> The node warns that unsupported amendments have reached majority, with activation expected on 9 Oct 2026.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>3. Problem hypotheses</h2>
+      <p>Issues that, as things stand, stop us from keeping the full ledger on this machine.
+        <span class="tag m">measured</span> means we observed it in this spike, <span class="tag d">documented</span> means it comes from xrpl.org and we did not test it,
+        and <span class="tag s">suspected</span> means we have not confirmed the cause.</p>
+      <div class="scroll"><table>
+        <thead><tr><th>Problem</th><th>Evidence</th><th>Basis</th></tr></thead>
+        <tbody>
+          <tr><td>P1 · Not enough SSD</td><td>Full history takes about 39 TB in xrpld's database and grows about 12 GB per day.
+            We have ${bytes((S.disks.find(d => d.mount === '/validatorfs') || {}).free || 0)} free on the NVMe, which is about 9 months of history at 4.5 TB per year.</td>
+            <td><span class="tag m">measured</span> <span class="tag d">documented</span></td></tr>
+          <tr><td>P2 · The big disks are HDDs</td><td>The 18 TB array uses spinning disks. xrpld's database needs SSD, so the array cannot host a node.</td>
+            <td><span class="tag m">measured</span> <span class="tag d">documented</span></td></tr>
+          <tr><td>P3 · File size limit</td><td>Both disks use ext4, which caps a single file at 16 TB. A full-history database needs XFS or ZFS.</td>
+            <td><span class="tag m">measured</span> <span class="tag d">documented</span></td></tr>
+          <tr><td>P4 · Not enough RAM</td><td>${fmt(S.mem_total / 2**30, 0)} GB in total, about 15 GB of it used by the validator.
+            xrpl.org recommends 64 GB for a single production server, so a second node here would compete with the validator.</td>
+            <td><span class="tag m">measured</span> <span class="tag d">documented</span></td></tr>
+          <tr><td>P5 · Validator isolation</td><td>xrpl.org warns that heavy API load makes validators less reliable, and recommends keeping them behind separate stock servers.
+            We already lost about 3 minutes of consensus to one restart, which we suspect was triggered by the package install.</td>
+            <td><span class="tag d">documented</span> <span class="tag s">suspected</span></td></tr>
+          <tr><td>P6 · Acquisition time</td><td>Syncing full history from peers takes several months. Fetching 107M ledgers from public servers at about 10 per second takes about 4 months,
+            and those servers throttle bulk use.</td>
+            <td><span class="tag m">measured</span> <span class="tag d">documented</span></td></tr>
+          <tr><td>P7 · Pending upgrade</td><td>If xrpld is not upgraded before about 9 Oct 2026, the node becomes amendment-blocked and stops following the network.</td>
+            <td><span class="tag m">measured</span></td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <section>
+      <h2>4. Solution hypotheses</h2>
+      <p>What we believe will work, and how we would know.</p>
+      <div class="scroll"><table>
+        <thead><tr><th>Next step</th><th>Hypothesis</th><th>Success looks like</th></tr></thead>
+        <tbody>
+          <tr><td>S1 · Parquet archive on the HDD array</td><td>Store history as Parquet, not as a node database. It is about 8× smaller, sequential access suits HDDs,
+            and researchers can query it directly with DuckDB, pandas or R. Addresses P1–P3.</td>
+            <td>The 24 h export finishes and is consistent (burn equals fees). Already true for the portion done.</td></tr>
+          <tr><td>S2 · Backfill the last 12 months</td><td>Run the exporter against public servers, month by month, at a polite rate.
+            About 8.3M ledgers, roughly 10 days of fetching and about 450 GB on disk.</td>
+            <td>12 full months on the calendar, with no rate-limit bans.</td></tr>
+          <tr><td>S3 · Daily incremental export</td><td>A daily job appends the previous UTC day (about 22k ledgers, about 1.2 GB), so the dataset stays current.</td>
+            <td>No gaps in the calendar for 30 consecutive days.</td></tr>
+          <tr><td>S4 · Dedicated history node</td><td>A separate machine (64 GB RAM, large SSD, XFS) running a non-validating stock server with deep history.
+            It feeds the exporter and doubles as the proxy xrpl.org recommends in front of the validator. Addresses P4–P6.</td>
+            <td>Exporter throughput above public-server rates, with no change in validator performance.</td></tr>
+          <tr><td>S5 · Ledger state snapshots</td><td>Pilot one <code>ledger_data</code> dump (every account, trust line, offer and AMM pool) to measure its size,
+            then decide how often to take them. This is new data that transactions alone cannot provide.</td>
+            <td>Size of one snapshot is known, and a snapshot schedule is chosen.</td></tr>
+          <tr><td>S6 · Protect the validator</td><td>Upgrade xrpld before 9 Oct 2026 and schedule package installs, so restarts happen only when planned. Addresses P7.</td>
+            <td>No amendment block, and no unplanned restarts.</td></tr>
+          <tr><td>S7 · Publish the dataset</td><td>Add a schema document, checksums and a download route, so outside scientists can use the data.</td>
+            <td>A researcher outside the team runs a query on the data without our help.</td></tr>
+        </tbody>
+      </table></div>
+    </section>`;
+
+  // Next update: the refresh job runs at :MM each hour after the report was generated.
+  (function () {
+    const gen = new Date(D.generated_at), mm = D.refresh_minute ?? 7;
+    const next = new Date(gen); next.setUTCMinutes(mm, 0, 0);
+    if (next <= gen) next.setUTCHours(next.getUTCHours() + 1);
+    const inEl = document.getElementById('next-in'), atEl = document.getElementById('next-at');
+    const upEl = document.getElementById('updated');
+    function tick() {
+      const ago = (Date.now() - gen) / 1e3;
+      upEl.innerHTML = `Updated <b>${ago < 60 ? 'just now' : `${dur(ago)} ago`}</b> (${esc(utc(D.generated_at))})`;
+      upEl.classList.toggle('stale', ago > 75 * 60);  // the refresh runs hourly; older than that means it missed a run
+      const s = (next - Date.now()) / 1e3;
+      inEl.textContent = s > 0 ? `in ${dur(s)}` : 'due now';
+      atEl.textContent = s > -600 ? `at ${when(next)}` : `expected at ${when(next)}; this page may be stale`;
+    }
+    tick(); setInterval(tick, 30e3);
+  })();
+
+  // Tabs
+  const tabs = [['tab-export', 'app'], ['tab-spike', 'spike']];
+  function select(id) {
+    tabs.forEach(([t, panel]) => {
+      const on = t === id;
+      document.getElementById(t).setAttribute('aria-selected', on);
+      document.getElementById(panel).hidden = !on;
+    });
+    try { history.replaceState(null, '', id === 'tab-spike' ? '#spike' : '#export'); } catch (e) {}
+  }
+  tabs.forEach(([t]) => document.getElementById(t).addEventListener('click', () => select(t)));
+  document.querySelector('.tabs').addEventListener('keydown', e => {
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+    const i = tabs.findIndex(([t]) => document.getElementById(t).getAttribute('aria-selected') === 'true');
+    const next = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length][0];
+    select(next); document.getElementById(next).focus();
+  });
+  if (location.hash === '#spike') select('tab-spike');
+
+  function tipFor(host) {
+    const tip = document.createElement('div'); tip.className = 'tip'; tip.hidden = true; host.appendChild(tip);
+    return {
+      show(html, x, y) { tip.innerHTML = html; tip.hidden = false; tip.style.left = x + 'px'; tip.style.top = y + 'px'; },
+      hide() { tip.hidden = true; },
+    };
+  }
+  const niceMax = (v) => { const p = 10 ** Math.floor(Math.log10(v || 1)); const m = v / p; return (m <= 2 ? 2 : m <= 5 ? 5 : 10) * p; };
+  const topRound = (x, y, w, h, r = 4) => {
+    r = Math.min(r, h, w / 2);
+    return `M${x},${y + h}V${y + r}Q${x},${y} ${x + r},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h}Z`;
+  };
+
+  // One-year coverage calendar: 53 week columns x 7 weekday rows, ending today (UTC).
+  (function () {
+    const host = document.getElementById('c-cal');
+    const byDay = Object.fromEntries(D.coverage.map(c => [c.day, c.ledgers]));
+    const today = new Date(D.generated_at.slice(0, 10) + 'T00:00:00Z');
+    const first = new Date(today); first.setUTCDate(first.getUTCDate() - 364);
+    first.setUTCDate(first.getUTCDate() - first.getUTCDay());   // back to Sunday
+    const c = 12, gap = 3, m = { t: 16, l: 26 }, days = [];
+    for (let d = new Date(first); d <= today; d.setUTCDate(d.getUTCDate() + 1)) days.push(new Date(d));
+    const weeks = Math.ceil(days.length / 7), W = m.l + weeks * (c + gap), H = m.t + 7 * (c + gap);
+    let g = '', lastMonth = -1;
+    days.forEach((d, i) => {
+      const col = Math.floor(i / 7), row = d.getUTCDay(), key = d.toISOString().slice(0, 10), n = byDay[key] || 0;
+      const x = m.l + col * (c + gap), y = m.t + row * (c + gap);
+      if (row === 0 && d.getUTCMonth() !== lastMonth && d.getUTCDate() <= 7) {
+        lastMonth = d.getUTCMonth();
+        g += `<text x="${x}" y="10">${d.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' })}</text>`;
+      }
+      const fill = n === 0 ? 'var(--track)' : n >= 0.95 * perDay ? 'var(--s1)' : 'var(--s1-soft)';
+      g += `<rect class="hit" data-k="${key}" data-n="${n}" x="${x}" y="${y}" width="${c}" height="${c}" rx="2" fill="${fill}"/>`;
+    });
+    ['Mon', 'Wed', 'Fri'].forEach((l, j) => g += `<text x="0" y="${m.t + (1 + 2 * j) * (c + gap) + c - 2}">${l}</text>`);
+    host.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="min-width:${W}px;max-width:${W * 1.3}px" role="img" aria-label="Calendar of days with data on disk over the last year">${g}</svg>`;
+    const tip = tipFor(host), svg = host.querySelector('svg');
+    svg.addEventListener('pointermove', e => {
+      const t = e.target.closest('.hit'); if (!t) return tip.hide();
+      const n = +t.dataset.n, r = t.getBoundingClientRect(), hr = host.getBoundingClientRect();
+      tip.show(`<b>${t.dataset.k}</b><br>${n ? `${fmt(n)} ledgers · ${fmt(Math.min(100, 100 * n / perDay), 0)}% of the day` : 'No data on disk'}`,
+        r.left - hr.left + r.width / 2 + host.scrollLeft, r.top - hr.top);
+    });
+    svg.addEventListener('pointerleave', () => tip.hide());
+  })();
+
+  // Hourly stacked bars: succeeded at the base, failed on top, 2px surface gap between.
+  (function () {
+    const host = document.getElementById('c-hourly'), H0 = D.hourly;
+    if (!H0.length) return;
+    const W = 1000, H = 260, m = { t: 10, r: 8, b: 28, l: 56 };
+    const iw = W - m.l - m.r, ih = H - m.t - m.b;
+    const max = niceMax(Math.max(...H0.map(h => h.txs)));
+    const step = iw / H0.length, bw = Math.max(3, step * 0.72);
+    const y = v => m.t + ih - (v / max) * ih;
+    let g = '';
+    for (let i = 0; i <= 4; i++) {
+      const v = max * i / 4, yy = y(v);
+      g += `<line x1="${m.l}" x2="${W - m.r}" y1="${yy}" y2="${yy}" stroke="var(${i ? '--grid' : '--axis'})"/>`;
+      g += `<text x="${m.l - 8}" y="${yy + 4}" text-anchor="end">${fmt(v)}</text>`;
+    }
+    const every = Math.ceil(H0.length / 12);
+    H0.forEach((h, i) => {
+      const x = m.l + i * step + (step - bw) / 2, fail = h.txs - h.ok;
+      const hs = ih * h.ok / max, hf = ih * fail / max;
+      const ys = m.t + ih - hs;
+      if (hf > 2) {
+        g += `<path d="${topRound(x, ys - hf, bw, hf - 2)}" fill="var(--s2)"/>`;
+        g += `<rect x="${x}" y="${ys}" width="${bw}" height="${hs}" fill="var(--s1)"/>`;
+      } else {
+        g += `<path d="${topRound(x, ys, bw, hs)}" fill="var(--s1)"/>`;
+      }
+      g += `<rect class="hit" data-i="${i}" x="${m.l + i * step}" y="${m.t}" width="${step}" height="${ih}" fill="transparent"/>`;
+      if (i % every === 0) g += `<text x="${x + bw / 2}" y="${H - 8}" text-anchor="middle">${h.hour.slice(11, 16)}</text>`;
+    });
+    host.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Stacked bar chart of transactions per hour">${g}</svg>`;
+    const tip = tipFor(host), svg = host.querySelector('svg');
+    svg.addEventListener('pointermove', e => {
+      const t = e.target.closest('.hit'); if (!t) return tip.hide();
+      const i = +t.dataset.i, h = H0[i], s = svg.getBoundingClientRect().width / W;
+      tip.show(`<b>${utc(h.hour)}</b><br>Succeeded <b>${fmt(h.ok)}</b> · Failed <b>${fmt(h.txs - h.ok)}</b><br>Total <b>${fmt(h.txs)}</b> in ${fmt(h.ledgers)} ledgers`,
+        (m.l + (i + 0.5) * step) * s, y(h.txs) * s);
+    });
+    svg.addEventListener('pointerleave', () => tip.hide());
+  })();
+
+  // Transaction types: horizontal bars, top 10 + Other.
+  (function () {
+    const host = document.getElementById('c-types');
+    const rows = D.types.slice(0, 10), rest = D.types.slice(10);
+    if (rest.length) rows.push({ type: `Other (${rest.length} types)`, n: rest.reduce((a, r) => a + r.n, 0), ok: rest.reduce((a, r) => a + r.ok, 0) });
+    const W = 540, rowH = 26, m = { l: 150, r: 70 }, H = rows.length * rowH;
+    const max = Math.max(...rows.map(r => r.n)), iw = W - m.l - m.r;
+    let g = '';
+    rows.forEach((r, i) => {
+      const yy = i * rowH, w = Math.max(3, (r.n / max) * iw), bh = 14, by = yy + (rowH - bh) / 2, x0 = m.l;
+      g += `<text x="${m.l - 10}" y="${yy + rowH / 2 + 4}" text-anchor="end" style="fill:var(--ink-2)">${esc(r.type)}</text>`;
+      g += `<path d="M${x0},${by}H${x0 + w - 4}Q${x0 + w},${by} ${x0 + w},${by + 4}V${by + bh - 4}Q${x0 + w},${by + bh} ${x0 + w - 4},${by + bh}H${x0}Z" fill="var(--s1)"/>`;
+      g += `<text x="${x0 + w + 6}" y="${yy + rowH / 2 + 4}">${fmt(r.n)}</text>`;
+      g += `<rect class="hit" data-i="${i}" x="0" y="${yy}" width="${W}" height="${rowH}" fill="transparent"/>`;
+    });
+    g += `<line x1="${m.l}" x2="${m.l}" y1="0" y2="${H}" stroke="var(--axis)"/>`;
+    host.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Bar chart of transactions by type">${g}</svg>`;
+    const tip = tipFor(host), svg = host.querySelector('svg');
+    svg.addEventListener('pointermove', e => {
+      const t = e.target.closest('.hit'); if (!t) return tip.hide();
+      const r = rows[+t.dataset.i], s = svg.getBoundingClientRect().width / W;
+      tip.show(`<b>${esc(r.type)}</b><br>${fmt(r.n)} txs · ${fmt(100 * r.n / T.txs, 1)}% of all<br>Success ${fmt(100 * r.ok / r.n, 1)}%`,
+        (m.l + (r.n / max) * iw / 2) * s, (+t.dataset.i * rowH + 4) * s);
+    });
+    svg.addEventListener('pointerleave', () => tip.hide());
+  })();
+})();
+</script>
+</body>
+</html>

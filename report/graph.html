@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>XRPL Transfer Graph</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;600&display=swap">
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f5f7f6; --surface: #fcfdfc; --sunk: #edf1ef;
+    --ink: #0f1d1a; --ink-2: #44524e; --muted: #7a8783;
+    --grid: #dfe5e2; --axis: #c2ccc8; --border: rgba(15,29,26,0.11);
+    --accent-ink: #075e50; --s1: #0b7a68;
+    /* graph categorical slots 1-3 (reference palette: the first three validate all-pairs in both modes) */
+    --c1: #2a78d6; --c2: #eb6834; --c3: #1baf7a; --c-other: #a5aeaa; --edge: #b9c3bf; --edge-hi: #44524e;
+    --display: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+    --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --page: #0d1412; --surface: #141d1a; --sunk: #101816;
+      --ink: #e6eeeb; --ink-2: #b3c0bb; --muted: #83918c;
+      --grid: #25302c; --axis: #34413c; --border: rgba(230,238,235,0.10);
+      --accent-ink: #6fd6c1; --s1: #35b89f;
+      --c1: #3987e5; --c2: #d95926; --c3: #199e70; --c-other: #5e6965; --edge: #34413c; --edge-hi: #b3c0bb;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #0d1412; --surface: #141d1a; --sunk: #101816;
+    --ink: #e6eeeb; --ink-2: #b3c0bb; --muted: #83918c;
+    --grid: #25302c; --axis: #34413c; --border: rgba(230,238,235,0.10);
+    --accent-ink: #6fd6c1; --s1: #35b89f;
+    --c1: #3987e5; --c2: #d95926; --c3: #199e70; --c-other: #5e6965; --edge: #34413c; --edge-hi: #b3c0bb;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.45 var(--body); }
+  header { padding: 16px 16px 8px; max-width: 1400px; margin: 0 auto; }
+  h1 { font: 600 22px/1.2 var(--display); margin: 0 0 4px; }
+  .sub { color: var(--ink-2); margin: 0; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: end; padding: 8px 16px 12px; max-width: 1400px; margin: 0 auto; }
+  .controls label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--ink-2); }
+  select, input[type=search] { font: 14px var(--body); color: var(--ink); background: var(--surface); border: 1px solid var(--border);
+    border-radius: 6px; padding: 6px 8px; min-height: 34px; }
+  input[type=search] { width: min(320px, 80vw); font-family: var(--mono); font-size: 12px; }
+  input[type=range] { width: 140px; accent-color: var(--s1); }
+  button { font: 13px var(--body); color: var(--ink); background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 10px; min-height: 34px; cursor: pointer; }
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 12px; padding: 0 16px 16px; max-width: 1400px; margin: 0 auto; }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; }
+  #stage { position: relative; height: min(72vh, 760px); min-height: 380px; overflow: hidden; }
+  #sigma { position: absolute; inset: 0; }
+  #legend { position: absolute; left: 12px; bottom: 10px; display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px;
+    color: var(--ink-2); background: color-mix(in srgb, var(--surface) 88%, transparent); padding: 6px 8px; border-radius: 6px; max-width: calc(100% - 24px); }
+  #legend span { display: inline-flex; align-items: center; gap: 6px; }
+  #legend i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  #note { position: absolute; right: 12px; top: 10px; font-size: 12px; color: var(--muted); }
+  #panel { padding: 14px 16px; overflow: auto; max-height: min(72vh, 760px); }
+  #panel h2 { font: 600 16px/1.25 var(--display); margin: 0 0 8px; word-break: break-all; }
+  #panel dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0 0 12px; font-size: 13px; }
+  #panel dt { color: var(--ink-2); } #panel dd { margin: 0; font-variant-numeric: tabular-nums; text-align: right; }
+  #panel .hint { color: var(--muted); font-size: 13px; }
+  code, .mono { font-family: var(--mono); font-size: 12px; }
+  a { color: var(--accent-ink); }
+  #loops { display: none; padding: 16px; }
+  #loops svg { width: 100%; height: auto; display: block; }
+  #loops table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 12px; }
+  #loops th, #loops td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+  #loops td.num, #loops th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .tip { position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 8px; font-size: 12px; color: var(--ink); box-shadow: 0 2px 8px rgba(0,0,0,.12); display: none; white-space: nowrap; }
+  .empty { padding: 40px 16px; color: var(--ink-2); text-align: center; }
+</style>
+</head>
+<body>
+<header>
+  <h1>XRPL Transfer Graph</h1>
+  <p class="sub" id="subtitle">Who pays whom on the XRP Ledger, by month. Nodes are entities (accounts grouped by on-ledger evidence); edges are summed transfers.</p>
+</header>
+<div class="controls" id="controls">
+  <label>Month <select id="month"></select></label>
+  <label>Asset <select id="asset"></select></label>
+  <label>View <select id="view">
+    <option value="backbone">Backbone (top 300)</option>
+    <option value="communities">Community map</option>
+    <option value="ego">Ego view</option>
+    <option value="loops">Loops over time</option>
+  </select></label>
+  <label>Colour by <select id="colour"><option value="role">Role</option><option value="community">Community</option></select></label>
+  <label>Min edge weight <input type="range" id="minw" min="0" max="100" value="0"></label>
+  <label>Find an account <input type="search" id="search" placeholder="r… address or entity id" list="egolist"></label>
+  <datalist id="egolist"></datalist>
+</div>
+<main>
+  <section class="card" id="stage">
+    <div id="sigma" role="img" aria-label="Network graph of transfers"></div>
+    <div id="legend"></div>
+    <div id="note"></div>
+  </section>
+  <aside class="card" id="panel"><p class="hint">Hover a node to see its neighbours. Click it for details and sample transactions.</p></aside>
+  <section class="card" id="loops" style="grid-column: 1 / -1"></section>
+</main>
+<div class="tip" id="tip"></div>
+<script src="vendor/graphology.umd.min.js"></script>
+<script src="vendor/sigma.min.js"></script>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const fmt = (x, d = 3) => x == null ? "–" : Math.abs(x) >= 1e6 ? (x / 1e6).toFixed(2) + " M" : Math.abs(x) >= 1e3
+  ? (x / 1e3).toFixed(1) + " k" : (+x).toPrecision(d).replace(/\.?0+$/, "");
+const ROLE_COLOURS = [["issuer", "--c1", "Issuer"], ["likely_custodial", "--c2", "Likely custodial"], ["amm_pool", "--c3", "AMM pool"]];
+const EXPLORER = "https://livenet.xrpl.org/transactions/";
+let INDEX = { views: [] }, renderer = null, graph = null, hovered = null, state = {};
+
+function readHash() {
+  // "~"-separated: only plain #anchors (letters, digits, . _ ~ -) reach a published page
+  const [view, month, label, centre] = location.hash.slice(1).split("~");
+  return { view, month, label, centre };
+}
+function writeHash() {
+  const s = state; const parts = [s.view, s.month, s.label];
+  if (s.view === "ego" && s.centre) parts.push(s.centre);
+  history.replaceState(null, "", "#" + parts.join("~"));
+}
+
+function nodeColour(attrs) {
+  const other = css("--c-other");
+  if (state.colour === "community" || attrs.community != null && graph.getAttribute("kind") === "communities") {
+    const c = attrs.community;
+    return c === 0 ? css("--c1") : c === 1 ? css("--c2") : c === 2 ? css("--c3") : other;
+  }
+  const hit = ROLE_COLOURS.find(([r]) => r === attrs.role);
+  return hit ? css(hit[1]) : other;
+}
+
+function legend() {
+  const el = $("legend"); const kind = graph && graph.getAttribute("kind");
+  const items = state.colour === "community" || kind === "communities"
+    ? [["--c1", "Community 0 (largest)"], ["--c2", "Community 1"], ["--c3", "Community 2"], ["--c-other", "Smaller communities"]]
+    : [...ROLE_COLOURS.map(([, v, l]) => [v, l]), ["--c-other", "Hub, bot pair or unknown"]];
+  el.innerHTML = items.map(([v, l]) => `<span><i style="background:${css(v)}"></i>${l}</span>`).join("");
+}
+
+function draw(data) {
+  if (renderer) { renderer.kill(); renderer = null; }
+  graph = graphology.Graph.from(data);
+  const sizes = graph.mapEdges((e, a) => a.size || 1);
+  const maxSize = Math.max(1, ...sizes);
+  const edgeCol = css("--edge"), edgeHi = css("--edge-hi");
+  renderer = new Sigma(graph, $("sigma"), {
+    defaultEdgeType: "arrow", renderEdgeLabels: false, labelFont: "IBM Plex Sans", labelSize: 11,
+    labelColor: { color: css("--ink-2") }, labelRenderedSizeThreshold: 9, zIndex: true,
+    nodeReducer: (n, a) => {
+      const r = { ...a, color: nodeColour(a), label: a.label };
+      if (hovered && n !== hovered && !graph.areNeighbors(n, hovered)) { r.color = css("--grid"); r.label = ""; r.zIndex = 0; }
+      if (a.centre || n === hovered) { r.highlighted = true; r.zIndex = 2; }
+      return r;
+    },
+    edgeReducer: (e, a) => {
+      const r = { ...a, color: edgeCol, size: Math.max(0.3, a.size * 0.8) };
+      if (a.size < (state.minw / 100) * maxSize) r.hidden = true;
+      if (hovered) { if (graph.hasExtremity(e, hovered)) { r.color = edgeHi; r.zIndex = 1; } else r.hidden = true; }
+      return r;
+    },
+  });
+  renderer.on("enterNode", ({ node }) => { hovered = node; renderer.refresh(); });
+  renderer.on("leaveNode", () => { hovered = null; renderer.refresh(); });
+  renderer.on("clickNode", ({ node }) => panel(node));
+  const hiddenEdges = data.attributes && data.attributes.n_hidden_edges;
+  $("note").textContent = `${graph.order} nodes · ${graph.size} edges` + (hiddenEdges ? ` · ${hiddenEdges.toLocaleString()} lighter edges not shown` : "");
+  legend();
+}
+
+function panel(node) {
+  const a = graph.getNodeAttributes(node), kind = graph.getAttribute("kind"), unit = state.label === "all" ? "transfers" : state.label.split("-")[0];
+  const rows = kind === "communities"
+    ? [["Entities", a.n_entities?.toLocaleString()], ["Largest members", (a.top_entities || []).map(x => `<code>${x.slice(0, 10)}…</code>`).join("<br>")]]
+    : [["Role", (a.role || "unknown").replace("_", " ")], ["Accounts in entity", a.n_accounts], ["Community", a.community ?? "–"],
+       ["Bow-tie part", a.bowtie], ["PageRank", fmt(a.pagerank)], ["Transfers in / out", `${fmt(a.in_n)} / ${fmt(a.out_n)}`],
+       ...(state.label !== "all" ? [[`Value in / out (${unit})`, `${fmt(a.in_value)} / ${fmt(a.out_value)}`]] : []),
+       ["Flow Index A1 / A2", `${fmt(a.flow_in)} / ${fmt(a.flow_out)}`], ...(a.ppr != null ? [["Personalized PageRank", fmt(a.ppr)]] : [])];
+  const top = graph.edges(node).map(e => [e, graph.getEdgeAttributes(e)]).sort((x, y) => (y[1].n || 0) - (x[1].n || 0)).slice(0, 5);
+  const tx = top.flatMap(([e, ea]) => (ea.hashes || []).slice(0, 1).map(h =>
+    `<li><a href="${EXPLORER}${h}" target="_blank" rel="noopener"><code>${h.slice(0, 12)}…</code></a> ${graph.source(e) === node ? "to" : "from"} <code>${(graph.source(e) === node ? graph.target(e) : graph.source(e)).slice(0, 8)}</code></li>`));
+  $("panel").innerHTML = `<h2>${kind === "communities" ? a.label : `<code>${node}</code>`}</h2><dl>${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v ?? "–"}</dd>`).join("")}</dl>`
+    + (kind !== "communities" ? `<button id="egobtn">Open ego view</button>` : "")
+    + (tx.length ? `<p class="hint">Sample transactions on its biggest edges:</p><ul class="mono">${tx.join("")}</ul>` : "");
+  const b = $("egobtn"); if (b) b.onclick = () => openEgo(node);
+}
+
+function openEgo(centre) {
+  const v = INDEX.views.find(x => x.kind === "ego" && x.month === state.month && x.label === state.label && x.centre === centre);
+  if (!v) {
+    $("panel").insertAdjacentHTML("beforeend", `<p class="hint">No precomputed ego view for this entity. Build one with<br><code>uv run graph/run.py ego ${centre} --month ${state.month} --asset ${state.label.split("-")[0]}</code></p>`);
+    return;
+  }
+  state.view = "ego"; state.centre = centre; $("view").value = "ego"; render();
+}
+
+async function render() {
+  writeHash();
+  const loops = state.view === "loops";
+  $("loops").style.display = loops ? "block" : "none";
+  $("stage").style.display = $("panel").style.display = loops ? "none" : "";
+  if (loops) return drawLoops();
+  let v;
+  if (state.view === "ego") {
+    const egos = INDEX.views.filter(x => x.kind === "ego" && x.month === state.month && x.label === state.label);
+    $("egolist").innerHTML = egos.map(x => `<option value="${x.centre}">`).join("");
+    v = egos.find(x => x.centre === state.centre) || egos[0];
+    if (v) state.centre = v.centre;
+  } else {
+    v = INDEX.views.find(x => x.kind === state.view && x.month === state.month && x.label === state.label);
+  }
+  if (!v) { if (renderer) renderer.kill(); renderer = null; $("note").textContent = "No view for this month and asset."; return; }
+  const data = await (await fetch("graph/" + v.file)).json();
+  draw(data);
+  writeHash();
+}
+
+async function drawLoops() {
+  const el = $("loops");
+  let d;
+  try { d = await (await fetch("graph/loops.json")).json(); } catch { el.innerHTML = '<p class="empty">No loop data yet.</p>'; return; }
+  const series = ["XRP", "RLUSD", "all"].map((lab, i) => ({ lab, col: css(`--c${i + 1}`),
+    pts: d.summary.filter(r => (r.asset_label === lab || (lab === "RLUSD" && r.asset_label.startsWith("RLUSD-"))) && r.loop_share != null)
+      .map(r => [r.month, r.loop_share]) })).filter(s => s.pts.length);
+  const months = [...new Set(d.summary.map(r => r.month))].sort();
+  const W = 900, H = 320, L = 48, R = 90, T = 16, B = 34;
+  const x = (m) => L + (months.length < 2 ? (W - L - R) / 2 : months.indexOf(m) * (W - L - R) / (months.length - 1));
+  const y = (v) => T + (1 - v) * (H - T - B);
+  const ink2 = css("--ink-2"), grid = css("--grid"), muted = css("--muted");
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Share of net flow that circulates in loops, by month">`;
+  for (const t of [0, 0.25, 0.5, 0.75, 1]) svg += `<line x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}" stroke="${grid}"/><text x="${L - 8}" y="${y(t) + 4}" text-anchor="end" font-size="11" fill="${muted}">${t * 100}%</text>`;
+  months.forEach((m, i) => { if (i % Math.ceil(months.length / 8) === 0 || i === months.length - 1) svg += `<text x="${x(m)}" y="${H - 12}" text-anchor="middle" font-size="11" fill="${muted}">${m}</text>`; });
+  for (const s of series) {
+    svg += `<path d="${s.pts.map((p, i) => (i ? "L" : "M") + x(p[0]) + " " + y(p[1])).join("")}" fill="none" stroke="${s.col}" stroke-width="2"/>`;
+    for (const p of s.pts) svg += `<circle cx="${x(p[0])}" cy="${y(p[1])}" r="4" fill="${s.col}" stroke="${css("--surface")}" stroke-width="2"/>`;
+    const last = s.pts[s.pts.length - 1];
+    svg += `<text x="${x(last[0]) + 10}" y="${y(last[1]) + 4}" font-size="12" fill="${ink2}">${s.lab} ${(last[1] * 100).toFixed(1)}%</text>`;
+  }
+  svg += `<rect id="hit" x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}" fill="transparent"/><line id="cross" y1="${T}" y2="${H - B}" stroke="${ink2}" stroke-dasharray="3 3" visibility="hidden"/></svg>`;
+  const rows = d.cycles.map(c => `<tr><td>${c.asset_label}</td><td class="num">${c.rank + 1}</td><td class="num">${c.length}</td><td>${c.entities.map(e => `<code>${e.slice(0, 8)}</code>`).join(" → ")} → <code>${c.entities[0].slice(0, 8)}</code></td><td class="num">${fmt(c.strength)}</td><td>${(c.hashes || []).slice(0, 2).map(h => `<a href="${EXPLORER}${h}" target="_blank" rel="noopener"><code>${h.slice(0, 10)}…</code></a>`).join(" ")}</td></tr>`).join("");
+  el.innerHTML = `<h2 style="font:600 16px var(--display);margin:0 0 4px">Share of net flow that goes round in loops</h2>
+    <p class="sub" style="margin:0 0 8px">Hodge decomposition of each month's net flow between entities: the rest is one-way (gradient) flow. Legend: ${series.map(s => `<span style="display:inline-flex;align-items:center;gap:4px;margin-right:10px"><i style="width:10px;height:10px;border-radius:50%;background:${s.col};display:inline-block"></i>${s.lab}</span>`).join("")}</p>
+    ${svg}<h3 style="font:600 14px var(--display);margin:16px 0 0">Strongest cycles, ${d.cycles_month}</h3>
+    <table><thead><tr><th>Asset</th><th class="num">Rank</th><th class="num">Length</th><th>Entities</th><th class="num">Strength</th><th>Sample transactions</th></tr></thead><tbody>${rows}</tbody></table>`;
+  const tip = $("tip"), hit = el.querySelector("#hit"), cross = el.querySelector("#cross"), box = el.querySelector("svg");
+  hit.addEventListener("mousemove", (ev) => {
+    const r = box.getBoundingClientRect(), px = (ev.clientX - r.left) * W / r.width;
+    const m = months.reduce((b, mm) => Math.abs(x(mm) - px) < Math.abs(x(b) - px) ? mm : b, months[0]);
+    cross.setAttribute("x1", x(m)); cross.setAttribute("x2", x(m)); cross.setAttribute("visibility", "visible");
+    tip.innerHTML = `<b>${m}</b><br>` + series.map(s => { const p = s.pts.find(q => q[0] === m); return `${s.lab}: ${p ? (p[1] * 100).toFixed(1) + "%" : "–"}`; }).join("<br>");
+    tip.style.display = "block"; tip.style.left = ev.pageX + 12 + "px"; tip.style.top = ev.pageY + 12 + "px";
+  });
+  hit.addEventListener("mouseleave", () => { tip.style.display = "none"; cross.setAttribute("visibility", "hidden"); });
+}
+
+function fillSelects() {
+  const months = [...new Set(INDEX.views.map(v => v.month))].sort();
+  const labels = [...new Set(INDEX.views.map(v => v.label))].sort((a, b) => (a === "XRP" ? -1 : b === "XRP" ? 1 : a.localeCompare(b)));
+  $("month").innerHTML = months.map(m => `<option>${m}</option>`).join("");
+  $("asset").innerHTML = labels.map(l => `<option>${l}</option>`).join("");
+  const h = readHash();
+  state = { view: h.view || "backbone", month: months.includes(h.month) ? h.month : months[months.length - 1],
+            label: labels.includes(h.label) ? h.label : labels[0], centre: h.centre, colour: "role", minw: 0 };
+  $("month").value = state.month; $("asset").value = state.label; $("view").value = state.view;
+}
+
+for (const id of ["month", "asset", "view"]) $(id).addEventListener("change", (e) => {
+  state[id === "asset" ? "label" : id] = e.target.value; if (id !== "view") state.centre = undefined; render(); });
+$("colour").addEventListener("change", (e) => { state.colour = e.target.value; if (renderer) { renderer.refresh(); legend(); } });
+$("minw").addEventListener("input", (e) => { state.minw = +e.target.value; if (renderer) renderer.refresh(); });
+$("search").addEventListener("change", (e) => {
+  const q = e.target.value.trim(); if (!q) return;
+  if (graph && graph.hasNode(q) && state.view !== "ego") { panel(q); hovered = q; renderer.refresh(); return; }
+  state.view = "ego"; $("view").value = "ego"; state.centre = q;
+  const v = INDEX.views.find(x => x.kind === "ego" && x.month === state.month && x.label === state.label && x.centre === q);
+  if (v) render(); else $("panel").innerHTML = `<p class="hint">No precomputed ego view for <code>${q}</code> in ${state.month}. Accounts inside a grouped entity use the entity id. Build one with<br><code>uv run graph/run.py ego ${q} --month ${state.month}</code></p>`;
+});
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (renderer) { renderer.refresh(); legend(); } });
+
+if (window.INLINE_GRAPH) {
+  $("controls").style.display = "none"; $("subtitle").textContent = window.INLINE_NOTE || "";
+  state = { colour: "role", minw: 0, label: "XRP" }; draw(window.INLINE_GRAPH);
+} else {
+  fetch("graph/index.json").then(r => r.json()).then(d => { INDEX = d; fillSelects(); render(); })
+    .catch(() => { $("stage").innerHTML = '<p class="empty">No graph views yet: run <code>uv run graph/run.py all</code>.</p>'; });
+}
+</script>
+</body>
+</html>

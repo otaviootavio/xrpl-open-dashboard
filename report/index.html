@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>XRPL Open Data</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+    --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,0.10);
+    --s1: #2a78d6; --s2: #eb6834; --warn-bg: #fff6e0; --warn: #fab219;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --page: #0d0d0d; --surface: #1a1a19; --ink: #fff; --ink-2: #c3c2b7;
+      --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
+      --s1: #3987e5; --s2: #d95926; --warn-bg: #2a2210;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #fff; --ink-2: #c3c2b7;
+    --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
+    --s1: #3987e5; --s2: #d95926; --warn-bg: #2a2210;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--ink);
+         font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1080px; margin: 0 auto; padding: 32px 16px 64px; }
+  header h1 { font-size: 1.6rem; margin: 0 0 4px; letter-spacing: -0.01em; }
+  header p { margin: 0; color: var(--ink-2); }
+  .meta { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  code { font-size: 12px; }
+  .warn { display: flex; gap: 10px; align-items: flex-start; margin: 20px 0 0; padding: 10px 14px;
+          background: var(--warn-bg); border: 1px solid var(--border); border-left: 4px solid var(--warn);
+          border-radius: 6px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 24px 0; }
+  .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .tile .k { font-size: 12px; color: var(--ink-2); }
+  .tile .v { font-size: 1.6rem; font-weight: 600; margin-top: 2px; }
+  .tile .s { font-size: 12px; color: var(--muted); }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+          padding: 18px 18px 12px; margin-bottom: 16px; }
+  .card h2 { font-size: 1rem; margin: 0 0 2px; }
+  .card .sub { font-size: 12px; color: var(--ink-2); margin: 0 0 12px; }
+  .row { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; }
+  @media (max-width: 760px) { .row { grid-template-columns: 1fr; } }
+  .legend { display: flex; gap: 16px; font-size: 12px; color: var(--ink-2); margin-bottom: 6px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+  .chart { position: relative; }
+  svg { display: block; width: 100%; height: auto; overflow: visible; }
+  svg text { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .tip { position: absolute; pointer-events: none; background: var(--surface); color: var(--ink);
+         border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 12px;
+         box-shadow: 0 4px 16px rgba(0,0,0,.12); white-space: nowrap; transform: translate(-50%, calc(-100% - 10px)); }
+  .tip b { font-variant-numeric: tabular-nums; }
+  .scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+  th { color: var(--ink-2); font-weight: 600; }
+  td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
+  details summary { cursor: pointer; color: var(--ink-2); font-size: 12px; margin: 6px 0; }
+  .files li { margin: 4px 0; }
+  .empty { padding: 40px; text-align: center; color: var(--ink-2); }
+</style>
+</head>
+<body>
+<main id="app"><div class="empty">No data yet — run <code>./xrpl_snapshot.sh</code> to generate <code>report/data.js</code>.</div></main>
+<script src="data.js"></script>
+<script>
+(() => {
+  const S = window.SNAPSHOT;
+  if (!S) return;
+  const $ = (h) => { const t = document.createElement('template'); t.innerHTML = h.trim(); return t.content.firstChild; };
+  const fmt = (n, d = 0) => Number(n).toLocaleString('en-US', { maximumFractionDigits: d, minimumFractionDigits: d });
+  const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const L = S.ledgers, T = S.totals;
+  const span = (new Date(L[L.length - 1].close_time) - new Date(L[0].close_time)) / 1000;
+  const successRate = T.transactions ? 100 * S.results.filter(r => r.result === 'tesSUCCESS').reduce((a, r) => a + r.count, 0) / T.transactions : 0;
+  const gen = S.generated_at.replace(/(\d{4})(\d\d)(\d\d)T(\d\d)(\d\d)(\d\d)Z/, '$1-$2-$3 $4:$5:$6 UTC');
+
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <header>
+      <h1>XRPL Open Data</h1>
+      <p>Mainnet snapshot of ledgers #${fmt(L[0].ledger_index)} – #${fmt(L[L.length - 1].ledger_index)}, read directly from our rippled node.</p>
+      <div class="meta">Generated ${gen} · rippled ${esc(S.node.build_version)} · source <code>${esc(S.source)}</code></div>
+    </header>
+    ${S.node.warnings.map(w => `<div class="warn" role="note"><span aria-hidden="true">⚠️</span><div><b>Node warning:</b> ${esc(w)}</div></div>`).join('')}
+    <section class="tiles">
+      ${[
+        ['Transactions', fmt(T.transactions), `${fmt(L.length)} ledgers · ${fmt(span)} s`],
+        ['Throughput', fmt(span ? T.transactions / span : 0, 1) + ' tx/s', `${fmt(T.transactions / L.length, 1)} tx per ledger`],
+        ['Success rate', fmt(successRate, 1) + '%', 'tesSUCCESS'],
+        ['Active accounts', fmt(T.unique_accounts), 'distinct senders'],
+        ['XRP delivered', fmt(T.xrp_delivered, 0), 'native-XRP payments'],
+        ['Fees burned', fmt(T.fees_burned_xrp, 4) + ' XRP', `base fee ${S.fees.base_fee_xrp} XRP`],
+      ].map(([k, v, s]) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${s}</div></div>`).join('')}
+    </section>
+    <section class="card">
+      <h2>Transactions per ledger</h2>
+      <p class="sub">Outcome of every transaction included in each validated ledger.</p>
+      <div class="legend"><span><i style="background:var(--s1)"></i>Succeeded (tesSUCCESS)</span><span><i style="background:var(--s2)"></i>Included, failed (tec*)</span></div>
+      <div class="chart" id="c-ledgers"></div>
+      <details><summary>Show as table</summary><div class="scroll"><table>
+        <thead><tr><th>Ledger</th><th>Close time (UTC)</th><th class="n">Txs</th><th class="n">Succeeded</th><th class="n">Failed</th><th class="n">Total XRP</th></tr></thead>
+        <tbody>${L.map(l => `<tr><td>${l.ledger_index}</td><td>${l.close_time.replace('T', ' ').replace('Z', '')}</td><td class="n">${l.tx_count}</td><td class="n">${l.tx_success}</td><td class="n">${l.tx_count - l.tx_success}</td><td class="n">${fmt(l.total_xrp, 6)}</td></tr>`).join('')}</tbody>
+      </table></div></details>
+    </section>
+    <div class="row">
+      <section class="card">
+        <h2>Transaction types</h2>
+        <p class="sub">Count by TransactionType across the snapshot.</p>
+        <div class="chart" id="c-types"></div>
+      </section>
+      <section class="card">
+        <h2>Result codes</h2>
+        <p class="sub">Engine results. tec* transactions still pay the fee.</p>
+        <div class="scroll"><table>
+          <thead><tr><th>Result</th><th class="n">Count</th><th class="n">Share</th></tr></thead>
+          <tbody>${S.results.map(r => `<tr><td><code>${esc(r.result)}</code></td><td class="n">${fmt(r.count)}</td><td class="n">${fmt(100 * r.count / T.transactions, 1)}%</td></tr>`).join('')}</tbody>
+        </table></div>
+      </section>
+    </div>
+    <div class="row">
+      <section class="card">
+        <h2>Network &amp; node</h2>
+        <div class="scroll"><table><tbody>
+          ${[
+            ['Server state', S.node.server_state], ['Peers', S.node.peers],
+            ['Proposers (last close)', S.node.proposers], ['Validation quorum', S.node.validation_quorum],
+            ['Consensus converge time', S.node.converge_time_s + ' s'], ['Load factor', S.node.load_factor],
+            ['Node uptime', fmt(S.node.uptime_s / 3600, 1) + ' h'], ['Complete ledgers', S.node.complete_ledgers],
+            ['Account reserve', `${S.fees.reserve_base_xrp} XRP + ${S.fees.reserve_inc_xrp} XRP/object`],
+            ['Open-ledger fee', S.fees.drops.open_ledger_fee + ' drops'],
+          ].map(([k, v]) => `<tr><th>${k}</th><td class="n">${esc(v)}</td></tr>`).join('')}
+        </tbody></table></div>
+      </section>
+      <section class="card">
+        <h2>Get the data</h2>
+        <p class="sub">Files written next to this report by <code>xrpl_snapshot.sh</code> (CSV + JSON, UTC).</p>
+        <ul class="files">
+          ${[['latest_transactions.csv', 'one row per transaction'], ['latest_ledgers.csv', 'one row per ledger'], ['latest_snapshot.json', 'aggregates + node info']]
+            .map(([f, d]) => `<li>${location.protocol === 'file:' ? `<a href="../data/${f}">${f}</a>` : `<code>data/${f}</code>`}: ${d}</li>`).join('')}
+        </ul>
+        <p class="sub">Timestamped copies (<code>*_${esc(S.generated_at)}.*</code>) are kept in <code>data/</code> for reproducibility.</p>
+      </section>
+    </div>`;
+
+  // Shared tooltip helper
+  function tipFor(host) {
+    const tip = $('<div class="tip" hidden></div>'); host.appendChild(tip);
+    return {
+      show(html, x, y) { tip.innerHTML = html; tip.hidden = false; tip.style.left = x + 'px'; tip.style.top = y + 'px'; },
+      hide() { tip.hidden = true; }
+    };
+  }
+  const niceMax = (v) => { const p = 10 ** Math.floor(Math.log10(v || 1)); return Math.ceil(v / p) * p; };
+  // Bar with 4px rounded top, square at baseline
+  const barPath = (x, y, w, h, r = 4) => {
+    r = Math.min(r, h, w / 2);
+    return `M${x},${y + h}V${y + r}Q${x},${y} ${x + r},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h}Z`;
+  };
+
+  // Chart 1: stacked bars per ledger
+  (function () {
+    const host = document.getElementById('c-ledgers');
+    const W = 1000, H = 260, m = { t: 10, r: 8, b: 28, l: 44 };
+    const iw = W - m.l - m.r, ih = H - m.t - m.b;
+    const max = niceMax(Math.max(...L.map(l => l.tx_count)));
+    const step = iw / L.length, bw = Math.max(2, step * 0.7);
+    const y = v => m.t + ih - (v / max) * ih;
+    let g = '';
+    for (let i = 0; i <= 4; i++) {
+      const v = max * i / 4, yy = y(v);
+      g += `<line x1="${m.l}" x2="${W - m.r}" y1="${yy}" y2="${yy}" stroke="var(${i ? '--grid' : '--axis'})"/>`;
+      g += `<text x="${m.l - 8}" y="${yy + 4}" text-anchor="end">${fmt(v)}</text>`;
+    }
+    const every = Math.ceil(L.length / 8);
+    L.forEach((l, i) => {
+      const x = m.l + i * step + (step - bw) / 2, fail = l.tx_count - l.tx_success;
+      const ys = y(l.tx_success), yf = y(l.tx_count);
+      const hs = m.t + ih - ys, hf = Math.max(0, ys - yf - 2);
+      if (fail > 0 && hf > 0) {
+        g += `<path d="${hs > 0 ? `M${x},${ys - 2}V${yf + Math.min(4, hf)}Q${x},${yf} ${x + Math.min(4, bw / 2)},${yf}H${x + bw - Math.min(4, bw / 2)}Q${x + bw},${yf} ${x + bw},${yf + Math.min(4, hf)}V${ys - 2}Z` : barPath(x, yf, bw, hf)}" fill="var(--s2)"/>`;
+      }
+      if (hs > 0) g += fail > 0 ? `<rect x="${x}" y="${ys}" width="${bw}" height="${hs}" fill="var(--s1)"/>` : `<path d="${barPath(x, ys, bw, hs)}" fill="var(--s1)"/>`;
+      g += `<rect class="hit" data-i="${i}" x="${m.l + i * step}" y="${m.t}" width="${step}" height="${ih}" fill="transparent"/>`;
+      if (i % every === 0) g += `<text x="${x + bw / 2}" y="${H - 8}" text-anchor="middle">…${String(l.ledger_index).slice(-4)}</text>`;
+    });
+    host.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Stacked bar chart of transactions per ledger">${g}</svg>`;
+    const tip = tipFor(host), svg = host.querySelector('svg');
+    svg.addEventListener('pointermove', e => {
+      const t = e.target.closest('.hit'); if (!t) return tip.hide();
+      const l = L[+t.dataset.i], r = host.getBoundingClientRect(), s = svg.getBoundingClientRect().width / W;
+      const cx = (m.l + (+t.dataset.i + 0.5) * step) * s;
+      tip.show(`Ledger <b>${l.ledger_index}</b><br>${l.close_time.slice(11, 19)} UTC<br>Succeeded <b>${l.tx_success}</b> · Failed <b>${l.tx_count - l.tx_success}</b><br>Total <b>${l.tx_count}</b>`, cx, y(l.tx_count) * s);
+    });
+    svg.addEventListener('pointerleave', () => tip.hide());
+  })();
+
+  // Chart 2: horizontal bars by type (top 10, rest folded into Other)
+  (function () {
+    const host = document.getElementById('c-types');
+    let rows = S.tx_types.slice(0, 10);
+    const rest = S.tx_types.slice(10);
+    if (rest.length) rows.push({ type: `Other (${rest.length} types)`, count: rest.reduce((a, r) => a + r.count, 0), success: rest.reduce((a, r) => a + r.success, 0) });
+    const W = 520, rowH = 26, m = { l: 150, r: 64 }, H = rows.length * rowH;
+    const max = Math.max(...rows.map(r => r.count)), iw = W - m.l - m.r;
+    let g = '';
+    rows.forEach((r, i) => {
+      const yy = i * rowH, w = Math.max(2, (r.count / max) * iw), bh = 14, by = yy + (rowH - bh) / 2;
+      g += `<text x="${m.l - 10}" y="${yy + rowH / 2 + 4}" text-anchor="end" style="fill:var(--ink-2)">${esc(r.type)}</text>`;
+      g += `<path d="M${m.l},${by}H${m.l + w - 4}Q${m.l + w},${by} ${m.l + w},${by + 4}V${by + bh - 4}Q${m.l + w},${by + bh} ${m.l + w - 4},${by + bh}H${m.l}Z" fill="var(--s1)"/>`;
+      g += `<text x="${m.l + w + 6}" y="${yy + rowH / 2 + 4}">${fmt(r.count)}</text>`;
+      g += `<rect class="hit" data-i="${i}" x="0" y="${yy}" width="${W}" height="${rowH}" fill="transparent"/>`;
+    });
+    g += `<line x1="${m.l}" x2="${m.l}" y1="0" y2="${H}" stroke="var(--axis)"/>`;
+    host.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Bar chart of transaction counts by type">${g}</svg>`;
+    const tip = tipFor(host), svg = host.querySelector('svg');
+    svg.addEventListener('pointermove', e => {
+      const t = e.target.closest('.hit'); if (!t) return tip.hide();
+      const r = rows[+t.dataset.i], s = svg.getBoundingClientRect().width / W;
+      tip.show(`<b>${esc(r.type)}</b><br>${fmt(r.count)} txs · ${fmt(100 * r.count / T.transactions, 1)}% of all<br>Success ${fmt(100 * r.success / r.count, 1)}%`,
+        (m.l + (r.count / max) * iw / 2) * s, (+t.dataset.i * rowH + 4) * s);
+    });
+    svg.addEventListener('pointerleave', () => tip.hide());
+  })();
+})();
+</script>
+</body>
+</html>

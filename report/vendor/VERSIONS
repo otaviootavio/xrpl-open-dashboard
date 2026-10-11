@@ -1,0 +1,4 @@
+# Vendored browser libraries for report/graph.html (no Node.js on this host; prebuilt files from jsdelivr).
+# sigma 4.0.0 (2026-10-08) was too new when vendored on 2026-10-10; 3.0.2 ships a UMD build (global Sigma).
+sigma.min.js sigma@3.0.2 https://cdn.jsdelivr.net/npm/sigma@3.0.2/dist/sigma.min.js sha256=be6f790da9c1856765b1c430de3b1aac50433223361870edb3097a9868218a88
+graphology.umd.min.js graphology@0.26.0 https://cdn.jsdelivr.net/npm/graphology@0.26.0/dist/graphology.umd.min.js sha256=dc337efa23903f61e064c8e7e7f93a429e6855dccfc2458802b4ed30c621c087

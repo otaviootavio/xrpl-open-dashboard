@@ -1,0 +1,166 @@
+{
+  "chunk": "0107281000-0107281933.parquet",
+  "fixtures": [
+    {
+      "hash": "AF76CF5AAE7B102715B37500C7EB4C6FEE34C2F3F1EC3C77FB9B04A08992CA44",
+      "table": "dex_swaps",
+      "why": "order-book offer fully consumed (Deleted Offer with PreviousFields)",
+      "where": "venue = 'orderbook' AND maker = 'rU8QEjAbNbXDnBR7kx9TLPXsAEng3axsz4'",
+      "rows": 1,
+      "expect": {
+        "asset_out": "XRP",
+        "amount_out": 75.589589,
+        "asset_in": "524C555344000000000000000000000000000000.rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De",
+        "amount_in": 114.862433
+      }
+    },
+    {
+      "hash": "3F560862DB9C79638792732DDAFD49418E92BB8B5C012D2F43E9D4701E2E7D6F",
+      "table": "dex_swaps",
+      "why": "order-book offer partly consumed (Modified Offer)",
+      "where": "venue = 'orderbook'",
+      "min_rows": 1
+    },
+    {
+      "hash": "1D6ACC845D1D44564D8AE94DA3BDB5FCD8CEA8674FDA26937F5EDFAD320B628A",
+      "table": "dex_swaps",
+      "why": "OfferCancel deletes an offer without PreviousFields: not a fill",
+      "rows": 0
+    },
+    {
+      "hash": "0C72BE4928BD3B6B0D81FF77569C26227E1355F5D0023B2042C1850361F8F4E1",
+      "table": "dex_swaps",
+      "why": "AMM swap: pool account XRP balance 460913684 -> 460788095 drops",
+      "where": "venue = 'amm'",
+      "rows": 1,
+      "expect": {
+        "maker": "rnv4kx1H76k43HYKZa3wrKhVnWNvA4kQpm",
+        "asset_out": "XRP",
+        "amount_out": 0.125589,
+        "asset_in": "4249547800000000000000000000000000000000.rBitcoiNXev8VoVxV7pwoQx1sSfonVP9i3"
+      }
+    },
+    {
+      "hash": "0C72BE4928BD3B6B0D81FF77569C26227E1355F5D0023B2042C1850361F8F4E1",
+      "table": "transfers",
+      "why": "partial payment: Amount asks 100,000 XRP; the delivered amount is used",
+      "rows": 1,
+      "expect": {
+        "asset": "XRP",
+        "partial_payment": true,
+        "is_self": true
+      },
+      "max": {
+        "value_f": 1.0
+      }
+    },
+    {
+      "hash": "EB66B0B22D26A3AE96553A5697E39749148AE254557256D7882FF2ABA0183CE3",
+      "table": "amm_events",
+      "why": "AMM deposit mints LP tokens",
+      "rows": 1,
+      "expect": {
+        "event": "deposit"
+      },
+      "min": {
+        "lp_delta": 0.0
+      }
+    },
+    {
+      "hash": "B472254CBAFD940622F8A85999EAD79206CBBD1306E4D7FBDFE1B66072074147",
+      "table": "amm_events",
+      "why": "AMM withdraw burns LP tokens",
+      "rows": 1,
+      "expect": {
+        "event": "withdraw"
+      },
+      "max": {
+        "lp_delta": 0.0
+      }
+    },
+    {
+      "hash": "93903EAD167CD30104A78914473EF99CEB2CBB19327FC5E090B7570C50EE17EF",
+      "table": "nft_events",
+      "why": "mint found by NFTokenPage before/after diff; issuer decoded from the ID (minted on behalf of Issuer)",
+      "where": "event = 'mint'",
+      "rows": 1,
+      "expect": {
+        "issuer": "rPFkv3gypzAg2CKnJpy9aui2Z8XWfoB8Hg",
+        "taxon": 2015
+      }
+    },
+    {
+      "hash": "D5D7F9DBF9152B2FEA689E484B40A66E79CAF69A9C614DDA7FCA28BD92273115",
+      "table": "nft_events",
+      "why": "accepted offer with Amount 0 is a transfer, not a sale",
+      "where": "event IN ('sale', 'transfer')",
+      "rows": 1,
+      "expect": {
+        "event": "transfer"
+      }
+    },
+    {
+      "hash": "016FC9A6CAE758D62DAAA11236E5ADC0BB3C04E0B0EEA60C83642A3E8F07CBBD",
+      "table": "trustline_changes",
+      "why": "RLUSD balance on a trust line, from the holder's side",
+      "where": "holder = 'rsWLaT8GQiX9hAwTZxW7Tu6AUYPBawCtTQ'",
+      "rows": 1,
+      "expect": {
+        "issuer": "rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De",
+        "currency_code": "RLUSD",
+        "change": "modified",
+        "balance_before": 7.982313,
+        "balance_after": 7.980972
+      }
+    },
+    {
+      "hash": "2006D291360BB031FEE9A28341A26865852D8E7C15B1EF04315D558B5194E560",
+      "table": "trustline_changes",
+      "why": "new trust line",
+      "where": "change = 'created'",
+      "min_rows": 1
+    },
+    {
+      "hash": "0847748FA2EBE1C7FFDBF7C438EF500886325E78980453A294C38F092D014001",
+      "table": "account_lifecycle",
+      "why": "account created with 1 XRP",
+      "rows": 1,
+      "expect": {
+        "event": "created",
+        "account": "rDGTxNcruZZQTRR2YtiPTETfFPGx9XmbbW",
+        "initial_drops": 1000000
+      }
+    },
+    {
+      "hash": "4BCFF357416DEF9F84BD232634278E31AB6603A20CC35B15CF2EBA7B1A163DB3",
+      "table": "account_lifecycle",
+      "why": "AccountDelete",
+      "rows": 1,
+      "expect": {
+        "event": "deleted"
+      }
+    },
+    {
+      "hash": "7231305D00DB1CD2BFFF6D87A9DF77D83C9A0D5ECA301FAE395F8AD785CA0399",
+      "table": "nft_events",
+      "why": "brokered sale: broker rpx9J accepts the sell offer (15.89 XRP) and the buy offer (16.142492 XRP); the buyer is the buy offer's owner",
+      "where": "event = 'sale'",
+      "rows": 1,
+      "expect": {
+        "seller": "rfScYLmkBiAKTa7FimoaxfBqWUSzk8AWke",
+        "buyer": "rhAYGFLxXLa2nqzVXenQU2XiqsoGsNWesb",
+        "broker": "rpx9JThQ2y37FaGeeJP7PXDUVEXY3PHZSC",
+        "drops": 15890000
+      }
+    },
+    {
+      "hash": "C3A27ABEEF843D28AFF62BE68BEF2AE1C44A1C90012219F3F91591560B093AC5",
+      "table": "dex_swaps",
+      "why": "multi-hop payment: RLUSD -> USDC -> XRP through two books, one row per hop",
+      "rows": 2,
+      "expect": {
+        "tx_type": "Payment"
+      }
+    }
+  ]
+}

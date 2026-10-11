@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>XRPL Low-Hanging-Fruit Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;600;700&display=swap">
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f5f7f6; --surface: #fcfdfc; --sunk: #edf1ef;
+    --ink: #0f1d1a; --ink-2: #44524e; --muted: #7a8783;
+    --grid: #dfe5e2; --axis: #c2ccc8; --border: rgba(15,29,26,0.11); --track: #e3e9e6;
+    --s1: #0b7a68; --s2: #c4572c; --s1-soft: #8fcabd; --accent-ink: #075e50;
+    --good: #16935b; --good-ink: #0c6b41; --warn: #d99a0b; --warn-ink: #8a5f00; --crit: #cc3b3b;
+    --display: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+    --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --page: #0d1412; --surface: #141d1a; --sunk: #101816;
+      --ink: #e6eeeb; --ink-2: #b3c0bb; --muted: #83918c;
+      --grid: #25302c; --axis: #34413c; --border: rgba(230,238,235,0.10); --track: #223029;
+      --s1: #35b89f; --s2: #e07a4f; --s1-soft: #1d5f53; --accent-ink: #6fd6c1;
+      --good: #2fbf7a; --good-ink: #5fd79b; --warn: #e8b23a; --warn-ink: #f0c666; --crit: #e36161;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #0d1412; --surface: #141d1a; --sunk: #101816;
+    --ink: #e6eeeb; --ink-2: #b3c0bb; --muted: #83918c;
+    --grid: #25302c; --axis: #34413c; --border: rgba(230,238,235,0.10); --track: #223029;
+    --s1: #35b89f; --s2: #e07a4f; --s1-soft: #1d5f53; --accent-ink: #6fd6c1;
+    --good: #2fbf7a; --good-ink: #5fd79b; --warn: #e8b23a; --warn-ink: #f0c666; --crit: #e36161;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.55 var(--body); }
+  main { max-width: 1120px; margin: 0 auto; padding: 28px 16px 72px; display: grid; gap: 20px; }
+  h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; }
+  h1 { font-size: 1.75rem; font-weight: 600; letter-spacing: -0.005em; line-height: 1.15; }
+  h2 { font-size: 1.12rem; font-weight: 600; }
+  .sub { font-size: 13px; color: var(--ink-2); margin: 2px 0 12px; max-width: 72ch; }
+  .meta { font-size: 12px; color: var(--muted); }
+  code, .mono { font-family: var(--mono); font-size: 12px; }
+  .eyebrow { font: 600 11px/1.4 var(--body); text-transform: uppercase; letter-spacing: .09em; color: var(--muted); }
+  .num { font-family: var(--display); font-variant-numeric: tabular-nums; }
+
+  .top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 12px 24px; }
+  .top .left { display: grid; gap: 4px; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px; white-space: nowrap;
+          font-size: 12px; font-weight: 600; border: 1px solid var(--border); background: var(--surface); color: var(--ink); }
+  .pill .dot { width: 8px; height: 8px; border-radius: 50%; }
+
+  .group { display: grid; gap: 12px; padding-top: 18px; border-top: 1px solid var(--grid); }
+  .group > header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 18px; min-width: 0; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 780px) { .grid2 { grid-template-columns: 1fr; } }
+  .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+  @media (max-width: 900px) { .grid3 { grid-template-columns: 1fr; } }
+
+  .figs { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px 0; }
+  .figs > div { padding: 2px 16px; border-left: 1px solid var(--grid); }
+  .figs > div:first-child { border-left: 0; }
+  .figs .k { font-size: 12px; color: var(--ink-2); }
+  .figs .v { font: 600 1.4rem/1.3 var(--display); font-variant-numeric: tabular-nums; }
+  .figs .s { font-size: 11.5px; color: var(--muted); }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 12px; color: var(--ink-2); margin-bottom: 6px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+  .chart { position: relative; }
+  svg { display: block; width: 100%; height: auto; overflow: visible; }
+  svg text { fill: var(--muted); font: 11px var(--body); font-variant-numeric: tabular-nums; }
+  .tip { position: absolute; pointer-events: none; background: var(--surface); color: var(--ink); z-index: 2;
+         border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 12px;
+         box-shadow: 0 4px 16px rgba(0,0,0,.14); white-space: nowrap; transform: translate(-50%, calc(-100% - 10px)); }
+  .tip b { font-variant-numeric: tabular-nums; }
+  .scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+  th { color: var(--ink-2); font-weight: 600; }
+  td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
+  .note { font-size: 12px; color: var(--muted); margin: 8px 0 0; }
+
+  .badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 3px 9px;
+           border-radius: 999px; border: 1px solid var(--border); }
+  .badge.ok { color: var(--good-ink); } .badge.ok .dot { background: var(--good); }
+  .badge.fail { color: var(--crit); } .badge.fail .dot { background: var(--crit); }
+  .badge .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+  .checks { display: grid; gap: 6px; margin-top: 10px; }
+  .checks .row { display: flex; gap: 10px; align-items: baseline; font-size: 12.5px; }
+  .checks .row .n { color: var(--ink-2); flex: 1; }
+
+  .callout { display: flex; gap: 10px; align-items: flex-start; padding: 14px 16px; border-radius: 8px; font-size: 13px;
+             background: color-mix(in srgb, var(--warn) 12%, var(--surface)); border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent); }
+  .callout.fresh { background: color-mix(in srgb, var(--good) 10%, var(--surface)); border-color: color-mix(in srgb, var(--good) 35%, transparent); }
+  .callout.fresh b { color: var(--good-ink); }
+  .callout b { color: var(--warn-ink); }
+  .tabs { display: flex; flex-wrap: wrap; gap: 6px; border-bottom: 1px solid var(--grid); padding-bottom: 10px; }
+  .tabs button { font: 600 12.5px/1 var(--body); color: var(--ink-2); background: var(--surface); border: 1px solid var(--border);
+                 border-radius: 999px; padding: 7px 12px; cursor: pointer; }
+  .tabs button[aria-selected="true"] { color: var(--accent-ink); border-color: var(--s1); background: color-mix(in srgb, var(--s1) 10%, var(--surface)); }
+  .tabs button:focus-visible { outline: 2px solid var(--s1); outline-offset: 2px; }
+  .callout p { margin: 4px 0 0; color: var(--ink-2); max-width: 90ch; }
+</style>
+</head>
+<body>
+
+<main>
+  <div id="app"></div>
+</main>
+
+<script>
+const D = /*__DATA__*/null;
+(() => {
+  const fmt = (n, d = 0) => n == null ? '–' : Number(n).toLocaleString('en-US', { maximumFractionDigits: d, minimumFractionDigits: d });
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const short = (a) => a && a.length > 16 ? `${a.slice(0, 8)}…${a.slice(-6)}` : (a ?? '');
+  const utc = (iso) => iso ? String(iso).replace('T', ' ').replace(/(:\d\d)?Z$/, '') + ' UTC' : '–';
+  const drops = (d, dec = 2) => d == null ? '–' : fmt(d / 1e6, dec);
+  const niceMax = (v) => { const p = 10 ** Math.floor(Math.log10(v || 1)); const m = v / p; return (m <= 2 ? 2 : m <= 5 ? 5 : 10) * p; };
+  const topRound = (x, y, w, h, r = 4) => {
+    r = Math.min(r, h, w / 2);
+    return `M${x},${y + h}V${y + r}Q${x},${y} ${x + r},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h}Z`;
+  };
+  function tipFor(host) {
+    const tip = document.createElement('div'); tip.className = 'tip'; tip.hidden = true; host.appendChild(tip);
+    return {
+      show(html, x, y) { tip.innerHTML = html; tip.hidden = false; tip.style.left = x + 'px'; tip.style.top = y + 'px'; },
+      hide() { tip.hidden = true; },
+    };
+  }
+
+  // ---- Generic chart helpers (shared across every section below) ----
+
+  // Single-series vertical bars over category labels, with hover tooltip.
+  function barChart(host, categories, values, { tipLabel = (i) => categories[i], valueFmt = fmt } = {}) {
+    if (!categories.length) { host.innerHTML = '<p class="note">No data.</p>'; return; }
+    const W = 900, H = 220, m = { t: 10, r: 8, b: 26, l: 56 };
+    const iw = W - m.l - m.r, ih = H - m.t - m.b;
+    const max = niceMax(Math.max(...values, 1));
+    const step = iw / categories.length, bw = Math.max(3, step * 0.66);
+    const y = v => m.t + ih - (v / max) * ih;
+    let g = '';
+    for (let i = 0; i <= 4; i++) {
+      const v = max * i / 4, yy = y(v);
+      g += `<line x1="${m.l}" x2="${W - m.r}" y1="${yy}" y2="${yy}" stroke="var(${i ? '--grid' : '--axis'})"/>`;
+      g += `<text x="${m.l - 8}" y="${yy + 4}" text-anchor="end">${valueFmt(v)}</text>`;
+    }
+    const every = Math.max(1, Math.ceil(categories.length / 12));
+    values.forEach((v, i) => {
+      const x = m.l + i * step + (step - bw) / 2, h = ih * v / max, yy = m.t + ih - h;
+      g += `<path d="${topRound(x, yy, bw, h)}" fill="var(--s1)"/>`;
+      g += `<rect class="hit" data-i="${i}" x="${m.l + i * step}" y="${m.t}" width="${step}" height="${ih}" fill="transparent"/>`;
+      if (i % every === 0) g += `<text x="${x + bw / 2}" y="${H - 6}" text-anchor="middle">${esc(categories[i])}</text>`;
+    });
+    host.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Bar chart">${g}</svg>`;
+    const tip = tipFor(host), svg = host.querySelector('svg');
+    svg.addEventListener('pointermove', e => {
+      const t = e.target.closest('.hit'); if (!t) return tip.hide();
+      const i = +t.dataset.i, s = svg.getBoundingClientRect().width / W;
+      tip.show(`<b>${esc(tipLabel(i))}</b><br>${valueFmt(values[i])}`, (m.l + (i + 0.5) * step) * s, y(values[i]) * s);
+    });
+    svg.addEventListener('pointerleave', () => tip.hide());
+  }
+
+  // One or two line series over category labels (e.g. monthly trend lines).
+  function lineChart(host, categories, series, { valueFmt = fmt } = {}) {
+    if (!categories.length) { host.innerHTML = '<p class="note">No data.</p>'; return; }
+    const W = 900, H = 220, m = { t: 10, r: 8, b: 26, l: 56 };
+    const iw = W - m.l - m.r, ih = H - m.t - m.b;
+    const allVals = series.flatMap(s => s.data);
+    const max = niceMax(Math.max(...allVals, 1));
+    const step = categories.length > 1 ? iw / (categories.length - 1) : iw;
+    const x = i => m.l + i * step, y = v => m.t + ih - (v / max) * ih;
+    const colors = ['var(--s1)', 'var(--s2)', 'var(--accent-ink)'];
+    let g = '';
+    for (let i = 0; i <= 4; i++) {
+      const v = max * i / 4, yy = y(v);
+      g += `<line x1="${m.l}" x2="${W - m.r}" y1="${yy}" y2="${yy}" stroke="var(${i ? '--grid' : '--axis'})"/>`;
+      g += `<text x="${m.l - 8}" y="${yy + 4}" text-anchor="end">${valueFmt(v)}</text>`;
+    }
+    series.forEach((s, si) => {
+      const pts = s.data.map((v, i) => `${x(i)},${y(v)}`).join(' ');
+      g += `<polyline points="${pts}" fill="none" stroke="${colors[si % colors.length]}" stroke-width="2"/>`;
+      s.data.forEach((v, i) => g += `<circle cx="${x(i)}" cy="${y(v)}" r="2.5" fill="${colors[si % colors.length]}"/>`);
+    });
+    const every = Math.max(1, Math.ceil(categories.length / 10));
+    categories.forEach((c, i) => { if (i % every === 0) g += `<text x="${x(i)}" y="${H - 6}" text-anchor="middle">${esc(c)}</text>`; });
+    host.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Line chart">${g}</svg>`;
+    if (series.length > 1) {
+      const leg = document.createElement('div'); leg.className = 'legend';
+      leg.innerHTML = series.map((s, i) => `<span><i style="background:${colors[i % colors.length]}"></i>${esc(s.name)}</span>`).join('');
+      host.prepend(leg);
+    }
+  }
+
+  // Horizontal bars for top-N lists (ranked tables as a chart).
+  function hBarChart(host, rows, { labelFn, valueFn, valueFmt = fmt }) {
+    if (!rows.length) { host.innerHTML = '<p class="note">No data.</p>'; return; }
+    const W = 560, rowH = 26, m = { l: 190, r: 70 };
+    const H = rows.length * rowH;
+    const max = Math.max(...rows.map(valueFn), 1), iw = W - m.l - m.r;
+    let g = '';
+    rows.forEach((r, i) => {
+      const yy = i * rowH, w = Math.max(3, (valueFn(r) / max) * iw), bh = 14, by = yy + (rowH - bh) / 2, x0 = m.l;
+      g += `<text x="${m.l - 10}" y="${yy + rowH / 2 + 4}" text-anchor="end" style="fill:var(--ink-2)">${esc(labelFn(r))}</text>`;
+      g += `<path d="${topRound(x0, by, w, bh)}" fill="var(--s1)"/>`;
+      g += `<text x="${x0 + w + 6}" y="${yy + rowH / 2 + 4}">${valueFmt(valueFn(r))}</text>`;
+    });
+    host.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Ranked bar chart">${g}</svg>`;
+  }
+
+  // 7 (weekday) x 24 (hour) heatmap grid.
+  function heatmap(host, grid) {
+    const c = 16, gap = 2, m = { t: 16, l: 30 };
+    const flat = grid.flat();
+    const max = Math.max(...flat, 1);
+    const W = m.l + 24 * (c + gap), H = m.t + 7 * (c + gap);
+    const wd = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    let g = '';
+    for (let h = 0; h < 24; h += 3) g += `<text x="${m.l + h * (c + gap)}" y="10">${h}:00</text>`;
+    for (let w = 0; w < 7; w++) {
+      g += `<text x="0" y="${m.t + w * (c + gap) + c - 4}">${wd[w]}</text>`;
+      for (let h = 0; h < 24; h++) {
+        const n = grid[w][h] || 0, t = n / max;
+        const fill = n === 0 ? 'var(--track)' : `color-mix(in srgb, var(--s1) ${Math.max(12, t * 100).toFixed(0)}%, var(--track))`;
+        g += `<rect class="hit" data-w="${w}" data-h="${h}" data-n="${n}" x="${m.l + h * (c + gap)}" y="${m.t + w * (c + gap)}" width="${c}" height="${c}" rx="2" fill="${fill}"/>`;
+      }
+    }
+    host.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Transaction volume heatmap by weekday and hour">${g}</svg>`;
+    const tip = tipFor(host), svg = host.querySelector('svg');
+    svg.addEventListener('pointermove', e => {
+      const t = e.target.closest('.hit'); if (!t) return tip.hide();
+      const r = t.getBoundingClientRect(), hr = host.getBoundingClientRect();
+      tip.show(`<b>${wd[+t.dataset.w]} ${t.dataset.h}:00 UTC</b><br>${fmt(+t.dataset.n)} txs`,
+        r.left - hr.left + r.width / 2, r.top - hr.top);
+    });
+    svg.addEventListener('pointerleave', () => tip.hide());
+  }
+
+  // ---- Page assembly ----
+  const M = D.macro, DEX = D.dex, PAY = D.payments, NFT = D.nft, SEC = D.security, INT = D.integrity;
+  // Freshness = how old this page is + how far the data was behind the chain when it was built.
+  const pageAgeMin = (Date.now() - Date.parse(D.generated_at)) / 60000;
+  const lagMin = D.validator.reachable && D.validator.gap_ledgers != null ? D.validator.gap_ledgers * 3.9 / 60 : null;
+  const behindMin = lagMin == null ? null : pageAgeMin + lagMin;
+  const stale = behindMin == null || behindMin > 60;
+  const ago = (m) => m < 90 ? `${fmt(Math.round(m))} min` : m < 2880 ? `${fmt(m / 60, 1)} h` : `${fmt(m / 1440, 1)} days`;
+  const VIEWS = [['macro', 'Macro health'], ['dex', 'DEX'], ['payments', 'Payments & accounts'], ['nft', 'NFTs'],
+                 ['security', 'Security'], ['integrity', 'Data integrity']];
+
+  document.getElementById('app').innerHTML = `
+    <header class="top">
+      <div class="left">
+        <span class="eyebrow">XRPL Open Data Project · low-hanging-fruit dashboard</span>
+        <h1>21 quick analyses, run on the real dataset</h1>
+        <span class="meta">Generated ${utc(D.generated_at)} · ledgers #${fmt(D.data_range.first_ledger)}–#${fmt(D.data_range.last_ledger)}
+          (${utc(D.data_range.t0)} → ${utc(D.data_range.t1)}) · ${fmt(D.data_range.ledgers)} ledgers · ${fmt(D.data_range.txs)} transactions</span>
+      </div>
+      <span class="pill" title="Page built ${utc(D.generated_at)}"><span class="dot" style="background:var(${stale ? '--warn' : '--good'})"></span>${behindMin == null ? 'Freshness unknown' : `Data ${ago(behindMin)} behind the chain`}</span>
+    </header>
+
+    <nav class="tabs" role="tablist" aria-label="Views">
+      <button role="tab" data-view="all" aria-selected="true">All views</button>
+      ${VIEWS.map(([k, label]) => `<button role="tab" data-view="${k}" aria-selected="false">${label}</button>`).join('')}
+    </nav>
+
+    <section class="group" data-view="macro" aria-label="Macro health">
+      <header><h2>Macro health</h2><span class="meta">Full 12-month window</span></header>
+
+      <div class="grid3">
+        <div class="card">
+          <h2>XRP burned vs. fees paid</h2>
+          <p class="sub">Drop in total supply across the dataset, compared with the fees recorded on every transaction.</p>
+          <div class="figs">
+            <div><div class="k">Burned</div><div class="v">${drops(M.deflation.burned_drops)} XRP</div><div class="s">supply change</div></div>
+            <div><div class="k">Fees paid</div><div class="v">${drops(M.deflation.fee_drops)} XRP</div><div class="s">sum(fee_drops)</div></div>
+            <div><div class="k">Annualized</div><div class="v">${fmt(M.deflation.annualized_pct, 4)}%</div><div class="s">of starting supply / yr</div></div>
+          </div>
+        </div>
+        <div class="card">
+          <h2>Busiest &amp; quietest ledger</h2>
+          <p class="sub">Transaction count extremes across ${fmt(D.data_range.ledgers)} ledgers.</p>
+          <div class="figs">
+            <div><div class="k">Busiest</div><div class="v">${fmt(M.busiest_ledger.tx_count)} txs</div><div class="s">#${fmt(M.busiest_ledger.ledger_index)} · ${utc(M.busiest_ledger.close_time)}</div></div>
+            <div><div class="k">Quietest</div><div class="v">${fmt(M.quietest_ledger.tx_count)} txs</div><div class="s">#${fmt(M.quietest_ledger.ledger_index)} · ${utc(M.quietest_ledger.close_time)}</div></div>
+          </div>
+        </div>
+        <div class="card">
+          <h2>Consensus latency</h2>
+          <p class="sub">Gap between consecutive ledger close times.</p>
+          <div class="figs">
+            <div><div class="k">Average</div><div class="v">${fmt(M.latency.avg_s, 2)} s</div></div>
+            <div><div class="k">p95</div><div class="v">${fmt(M.latency.p95_s, 1)} s</div></div>
+            <div><div class="k">Max</div><div class="v">${fmt(M.latency.max_s, 0)} s</div><div class="s">#${fmt(M.latency.max_at_ledger)} · ${utc(M.latency.max_at_time)}</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid2">
+        <div class="card">
+          <h2>Record single fee paid</h2>
+          <p class="sub">Highest <code>fee_drops</code> of any transaction in the dataset — XRPL's own "gas war" moment.</p>
+          <div class="figs">
+            <div><div class="k">Fee</div><div class="v">${drops(M.record_fee.fee_drops, 6)} XRP</div><div class="s">${fmt(M.record_fee.fee_drops)} drops</div></div>
+            <div><div class="k">Account</div><div class="v mono" style="font-size:.95rem" title="${esc(M.record_fee.account)}">${esc(short(M.record_fee.account))}</div><div class="s">ledger #${fmt(M.record_fee.ledger_index)} · ${utc(M.record_fee.close_time)}</div></div>
+          </div>
+        </div>
+        <div class="card">
+          <h2>Biggest single payment</h2>
+          <p class="sub">Largest native-XRP <code>Payment</code> delivered — the dataset's whale-alert headline.</p>
+          <div class="figs">
+            <div><div class="k">Amount</div><div class="v">${drops(M.biggest_payment.delivered_drops, 0)} XRP</div></div>
+            <div><div class="k">From → To</div><div class="v mono" style="font-size:.85rem" title="${esc(M.biggest_payment.account)} → ${esc(M.biggest_payment.destination)}">${esc(short(M.biggest_payment.account))} → ${esc(short(M.biggest_payment.destination))}</div>
+              <div class="s">ledger #${fmt(M.biggest_payment.ledger_index)} · ${utc(M.biggest_payment.close_time)}</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Fee percentiles by month</h2>
+        <p class="sub">p50 / p90 / p99 of <code>fee_drops</code> — does the fee escalate under load?</p>
+        <div class="chart" id="c-fee"></div>
+      </div>
+
+      <div class="grid2">
+        <div class="card">
+          <h2>Success vs. failure rate</h2>
+          <p class="sub">Share of transactions that landed <code>tesSUCCESS</code>, by month.</p>
+          <div class="chart" id="c-success"></div>
+        </div>
+        <div class="card">
+          <h2>New accounts per week</h2>
+          <p class="sub">Count of senders making their first appearance in the dataset that week.</p>
+          <div class="chart" id="c-growth"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Volume by hour and weekday (UTC)</h2>
+        <p class="sub">Each cell sums <code>tx_count</code> for ledgers closing in that hour/weekday across the whole year.</p>
+        <div class="chart" id="c-heat"></div>
+      </div>
+
+      <div class="card">
+        <h2>Curiosity payments</h2>
+        <p class="sub">The smallest transfers on record.</p>
+        <div class="figs">
+          <div><div class="k">Exactly 1 drop</div><div class="v">${fmt(M.curiosity.one_drop_payments)}</div><div class="s">payments of 0.000001 XRP</div></div>
+          <div><div class="k">Smallest non-zero</div><div class="v">${drops(M.curiosity.min_payment_drops, 6)} XRP</div>
+            <div class="s mono" title="${esc(M.curiosity.min_payment_account)}">${esc(short(M.curiosity.min_payment_account))}</div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>This dataset vs. the live XRPL network</h2>
+        <p class="sub">Our 12-month slice next to XRPL mainnet's all-time figures (reference figures as of ${esc(M.benchmark.as_of)}, from xrpscan.com / xrpl.org — not re-fetched on every build).</p>
+        <div class="scroll"><table>
+          <thead><tr><th>Metric</th><th class="n">This dataset (12 months)</th><th class="n">XRPL mainnet (all-time, ${esc(M.benchmark.as_of)})</th></tr></thead>
+          <tbody>
+            <tr><td>Transactions</td><td class="n">${fmt(D.data_range.txs)}</td><td class="n">${esc(M.benchmark.xrpl_wide.all_time_txs)}</td></tr>
+            <tr><td>Daily transactions</td><td class="n">${fmt(D.data_range.txs / 365, 0)}</td><td class="n">${fmt(M.benchmark.xrpl_wide.daily_txs)}</td></tr>
+            <tr><td>Funded / active accounts</td><td class="n">${fmt(M.account_totals.distinct_senders)} senders</td><td class="n">${esc(M.benchmark.xrpl_wide.funded_accounts)}</td></tr>
+            <tr><td>XRP burned / day</td><td class="n">${fmt(M.deflation.burned_drops / 1e6 / Math.max(M.deflation.days, 1), 2)}</td><td class="n">${fmt(M.benchmark.xrpl_wide.burn_per_day)}</td></tr>
+            <tr><td>Network age</td><td class="n">1 year (this slice)</td><td class="n">${esc(M.benchmark.xrpl_wide.network_age)}</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+    </section>
+
+    <section class="group" data-view="dex" aria-label="DEX">
+      <header><h2>DEX</h2><span class="meta">The XRP Ledger's built-in order book</span></header>
+      <div class="grid2">
+        <div class="card">
+          <h2>Offer churn</h2>
+          <p class="sub"><code>OfferCreate</code> vs. <code>OfferCancel</code> — how much of the order book is cancelled before it can fill?</p>
+          <div class="figs">
+            <div><div class="k">OfferCreate</div><div class="v">${fmt(DEX.offer_churn.create)}</div></div>
+            <div><div class="k">OfferCancel</div><div class="v">${fmt(DEX.offer_churn.cancel)}</div></div>
+            <div><div class="k">Cancel ratio</div><div class="v">${fmt(100 * DEX.offer_churn.ratio, 1)}%</div><div class="s">cancels / creates</div></div>
+          </div>
+        </div>
+        <div class="card">
+          <h2>Liquidity-stress proxy</h2>
+          <p class="sub">Share of all transactions that failed on a dry or exhausted DEX path.</p>
+          <div class="figs">
+            <div><div class="k">tecPATH_DRY</div><div class="v">${fmt(DEX.liquidity_stress.tec_path_dry)}</div></div>
+            <div><div class="k">tecUNFUNDED_OFFER</div><div class="v">${fmt(DEX.liquidity_stress.tec_unfunded_offer)}</div></div>
+            <div><div class="k">Share of all txs</div><div class="v">${fmt(DEX.liquidity_stress.pct_of_all, 2)}%</div></div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Offer activity by month</h2>
+        <div class="chart" id="c-offers"></div>
+      </div>
+    </section>
+
+    <section class="group" data-view="payments" aria-label="Payments and accounts">
+      <header><h2>Payments &amp; accounts</h2></header>
+      <div class="grid2">
+        <div class="card">
+          <h2>Whale vs. retail</h2>
+          <p class="sub">Log-scale distribution of native-XRP payment sizes.</p>
+          <div class="chart" id="c-hist"></div>
+        </div>
+        <div class="card">
+          <h2>Sender concentration</h2>
+          <p class="sub">How concentrated is XRP movement among senders?</p>
+          <div class="figs">
+            <div><div class="k">Gini coefficient</div><div class="v">${fmt(PAY.concentration.gini, 3)}</div><div class="s">0 = equal, 1 = one sender</div></div>
+            <div><div class="k">HHI</div><div class="v">${fmt(PAY.concentration.hhi, 4)}</div><div class="s">sum of squared shares</div></div>
+            <div><div class="k">Senders (with outflow)</div><div class="v">${fmt(PAY.concentration.accounts)}</div></div>
+          </div>
+        </div>
+      </div>
+      <div class="grid2">
+        <div class="card">
+          <h2>Destination-tag clustering</h2>
+          <p class="sub">Accounts receiving under the most distinct destination tags — a proxy for exchange-style deposit hubs.</p>
+          <div class="chart" id="c-tags"></div>
+        </div>
+        <div class="card">
+          <h2>Top issued currencies</h2>
+          <p class="sub">Successful payments that delivered a token instead of XRP.</p>
+          <div class="chart" id="c-iou"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>New vs. returning senders, by month</h2>
+        <p class="sub">Share of each month's transactions sent by an account making its first appearance that same month.</p>
+        <div class="chart" id="c-newret"></div>
+      </div>
+    </section>
+
+    <section class="group" data-view="nft" aria-label="NFTs">
+      <header><h2>NFTs</h2><span class="meta">${fmt(NFT.total_mint)} mints · ${fmt(NFT.total_burn)} burns over the year</span></header>
+      <div class="card">
+        <h2>Mint vs. burn, by month</h2>
+        <div class="chart" id="c-nft"></div>
+      </div>
+    </section>
+
+    <section class="group" data-view="security" aria-label="Security">
+      <header><h2>Security</h2></header>
+      <div class="card">
+        <h2>Spam / flood bursts</h2>
+        <p class="sub">Account-days with the most failed (<code>tec*</code>) transactions — candidates for automated retry storms or flooding.</p>
+        <div class="chart" id="c-bursts"></div>
+      </div>
+    </section>
+
+    <section class="group" data-view="integrity" aria-label="Data integrity">
+      <header><h2>Data integrity</h2>
+        <span class="badge ${INT.ok ? 'ok' : 'fail'}"><span class="dot"></span>${INT.ok ? 'All checks passed' : 'Checks failed'}</span></header>
+      <div class="card">
+        <p class="sub">Output of <code>verify_export.py</code>: gaps, duplicate ledgers/hashes, <code>tx_count</code> agreement, and burn-vs-fees.</p>
+        <div class="checks">
+          ${INT.checks.map(c => `<div class="row"><span class="badge ${c.ok ? 'ok' : 'fail'}"><span class="dot"></span>${c.ok ? 'OK' : 'FAIL'}</span><span class="n">${esc(c.name)}</span><span class="meta">${esc(c.detail)}</span></div>`).join('')}
+        </div>
+      </div>
+    </section>
+
+    <div class="callout ${stale ? '' : 'fresh'}">
+      <div>
+        <b>${stale ? 'Before treating this as current:' : 'Current data'}</b>
+        <p>This dashboard covers ${utc(D.data_range.t0)} → ${utc(D.data_range.t1)}, built ${ago(pageAgeMin)} ago.
+          ${D.validator.reachable
+            ? `When it was built, the validator was at ledger #${fmt(D.validator.validated_ledger)}, ${fmt(D.validator.gap_ledgers)} ledgers
+               (about ${ago(lagMin)}) past the dataset.${stale ? ' The page turns amber when the data is more than an hour behind; check that the forward exporter and the hourly rebuild are running.' : ''}`
+            : `The local validator was not reachable when this page was built, so the live gap could not be measured.`}
+          Transaction rows are also not yet cross-checked against each ledger's own <code>transaction_hash</code> root —
+          only ledger headers and the parent-hash chain are hash-verified today.</p>
+      </div>
+    </div>
+  `;
+
+  // ---- View tabs (state kept in the URL hash, e.g. #dex) ----
+  function showView(v) {
+    if (!VIEWS.some(([k]) => k === v)) v = 'all';
+    document.querySelectorAll('section.group[data-view]').forEach(s => { s.hidden = v !== 'all' && s.dataset.view !== v; });
+    document.querySelectorAll('.tabs button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.view === v)));
+  }
+  document.querySelector('.tabs').addEventListener('click', e => {
+    const b = e.target.closest('button[data-view]'); if (!b) return;
+    history.replaceState(null, '', b.dataset.view === 'all' ? location.pathname + location.search : '#' + b.dataset.view);
+    showView(b.dataset.view);
+  });
+  showView(location.hash.slice(1));
+
+  // ---- Render charts ----
+  lineChart(document.getElementById('c-fee'), M.fee_trend.months,
+    [{ name: 'p50', data: M.fee_trend.p50 }, { name: 'p90', data: M.fee_trend.p90 }, { name: 'p99', data: M.fee_trend.p99 }],
+    { valueFmt: v => fmt(v) + ' drops' });
+  lineChart(document.getElementById('c-success'), M.success_trend.months,
+    [{ name: 'tesSUCCESS %', data: M.success_trend.ok_pct }], { valueFmt: v => fmt(v, 1) + '%' });
+  barChart(document.getElementById('c-growth'), M.account_growth.weeks, M.account_growth.new_accounts,
+    { tipLabel: i => `Week of ${M.account_growth.weeks[i]}` });
+  heatmap(document.getElementById('c-heat'), M.seasonality.grid);
+  lineChart(document.getElementById('c-offers'), DEX.offer_churn.months,
+    [{ name: 'OfferCreate', data: DEX.offer_churn.create_by_month }, { name: 'OfferCancel', data: DEX.offer_churn.cancel_by_month }]);
+  barChart(document.getElementById('c-hist'), PAY.histogram.buckets, PAY.histogram.counts, { tipLabel: i => PAY.histogram.buckets[i] });
+  hBarChart(document.getElementById('c-tags'), PAY.destination_tags,
+    { labelFn: r => short(r.account), valueFn: r => r.distinct_tags, valueFmt: v => `${fmt(v)} tags` });
+  hBarChart(document.getElementById('c-iou'), PAY.issued_currency,
+    { labelFn: r => `${r.currency} · ${short(r.issuer)}`, valueFn: r => r.n, valueFmt: v => `${fmt(v)} payments` });
+  lineChart(document.getElementById('c-newret'), PAY.new_vs_returning.months,
+    [{ name: 'New-sender share', data: PAY.new_vs_returning.new_pct }], { valueFmt: v => fmt(v, 1) + '%' });
+  lineChart(document.getElementById('c-nft'), NFT.months, [{ name: 'Mint', data: NFT.mint }, { name: 'Burn', data: NFT.burn }]);
+  hBarChart(document.getElementById('c-bursts'), SEC.bursts,
+    { labelFn: r => `${short(r.account)} · ${r.day}`, valueFn: r => r.tec_count, valueFmt: v => `${fmt(v)} failed txs` });
+})();
+</script>
+</body>
+</html>

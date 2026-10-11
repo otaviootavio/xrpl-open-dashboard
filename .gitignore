@@ -1,0 +1,15 @@
+# Python
+.venv/
+__pycache__/
+.pytest_cache/
+
+# Generated outputs (rebuilt by the tools; the dataset itself lives in /local/data/xrpl)
+data/
+report/graph/
+report/graph_publish/
+report/graph_proto.html
+report/dashboard.html
+report/export.html
+report/data.js
+docs/graph-first-look-*-tables.md
+AGENTS.local.md
