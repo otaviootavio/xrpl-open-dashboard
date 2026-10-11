@@ -40,7 +40,7 @@ def main() -> None:
     (out / "graph").mkdir(parents=True)
     (out / "vendor").mkdir()
 
-    keep = [v for v in index["views"] if v["kind"] != "ego" or v["month"] == ego_month]
+    keep = [v for v in index["views"] if v["label"] != "all" and (v["kind"] != "ego" or v["month"] == ego_month)]   # the page has no all-assets view
     for v in keep:
         shutil.copy2(src / v["file"], out / "graph" / v["file"])
     shutil.copy2(src / "loops.json", out / "graph" / "loops.json")

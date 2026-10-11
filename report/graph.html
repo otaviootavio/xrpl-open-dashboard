@@ -91,19 +91,22 @@
   <p class="sub" id="subtitle">Who pays whom on the XRP Ledger, by month. Nodes are entities (accounts grouped by on-ledger evidence); edges are summed transfers.</p>
 </header>
 <div class="controls" id="controls">
-  <label>Month <select id="month"></select></label>
+  <label>Month <span id="monthout" class="mono"></span><input type="range" id="month" min="0" max="0" step="1" value="0" aria-describedby="monthout"></label>
   <label>Asset <select id="asset"></select></label>
   <label>View <select id="view">
     <option value="backbone">Backbone (top 300)</option>
     <option value="communities">Community map</option>
     <option value="community">One community</option>
     <option value="ego">Ego view</option>
+    <option value="periods">By period</option>
     <option value="loops">Loops over time</option>
   </select></label>
   <label>Colour by <select id="colour"><option value="role">Role</option><option value="community">Community</option></select></label>
-  <label>Min edge weight <input type="range" id="minw" min="0" max="100" value="0"></label>
-  <label class="switch"><input type="checkbox" id="alledges"> Show all edges</label>
-  <label class="switch"><input type="checkbox" id="animate"> Animate flow</label>
+  <label><span id="minv-label">Min total value moved</span> <input type="range" id="minv" min="0" max="100" value="0" aria-describedby="minv-out"><span id="minv-out" class="mono"></span></label>
+  <label><span id="minn-label">Min total payments</span> <input type="range" id="minn" min="0" max="100" value="0" aria-describedby="minn-out"><span id="minn-out" class="mono"></span></label>
+  <label class="switch"><input type="checkbox" id="alledges"> Show all connections</label>
+  <label class="switch"><input type="checkbox" id="trace" checked> Trace</label>
+  <label class="switch"><input type="checkbox" id="animate"> Animate</label>
   <label>Find an account <input type="search" id="search" placeholder="r… address or entity id" list="egolist"></label>
   <datalist id="egolist"></datalist>
 </div>
@@ -129,7 +132,11 @@ const fmt = (x, d = 3) => x == null ? "–" : Math.abs(x) >= 1e6 ? (x / 1e6).toF
   ? (x / 1e3).toFixed(1) + " k" : (+x).toPrecision(d).replace(/\.?0+$/, "");
 const ROLE_COLOURS = [["issuer", "--c1", "Issuer"], ["likely_custodial", "--c2", "Likely custodial"], ["amm_pool", "--c3", "AMM pool"]];
 const EXPLORER = "https://livenet.xrpl.org/transactions/";
-let animOn = !matchMedia("(prefers-reduced-motion: reduce)").matches, flowEdges = [], flowRaf = 0;
+let egoNote = "", MONTHS = [];
+const setMonth = (m) => { const i = Math.max(0, MONTHS.indexOf(m)); $("month").value = i; $("monthout").textContent = ` ${MONTHS[i] || ""}`; };
+let clickTimer = null, clickedNode = null;
+const CLICK_MS = 280;                      // two clicks within this time on a community are a drill-down
+let locked = null;                         // node whose neighbourhood stays in focus after a click
 let INDEX = { views: [] }, renderer = null, graph = null, hovered = null, state = {};
 
 const LABELS_DEFAULT = 30;                 // labels at default zoom; graph/layout.py LABELS_DEFAULT
@@ -173,108 +180,204 @@ function legend() {
     ? [["--c1", "Community 0 (largest)"], ["--c2", "Community 1"], ["--c3", "Community 2"], ["--c-other", "Smaller communities"]]
     : [...ROLE_COLOURS.map(([, v, l]) => [v, l]), ["--c-other", "Hub, bot pair or unknown"]];
   el.innerHTML = items.map(([v, l]) => `<span><i style="background:${css(v)}"></i>${l}</span>`).join("")
-    + (animOn ? "<span>Dots move from payer to payee: faster = larger average transfer, more dots = more transfers</span>" : "");
+    + (styles.flow.on ? "<span>Dots move from payer to payee: bigger dot = larger average transfer, more frequent dots = more payments; a quiet connection can be asleep</span>" : "");
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Connections. Every edge is a connection. WHICH connections are in view is decided once, by `view` (filter rules).
+// HOW they are shown is decided by independent styles (trace = the line, flow = moving dots); a style never filters
+// and a rule never draws. To add a rule push a function to view.rules; to add a style add an object to `styles`.
+// ---------------------------------------------------------------------------------------------------------------
+// A measure is a number on every connection that a slider can put a floor under. Sliders run linearly over log(1 + number)
+// between the lightest and the heaviest connection in the view. To add a measure, add an entry here and a slider in the controls.
+const measures = [
+  { id: "minv", label: "Min total value moved", of: (a) => a.value, unit: () => state.label.split("-")[0],
+    pos: 0, lo: 0, hi: 1 },
+  { id: "minn", label: "Min total payments", of: (a) => a.n, unit: () => "payments", pos: 0, lo: 0, hi: 1 },
+];
+const cutOf = (m) => m.lo + (m.pos / 100) * (m.hi - m.lo);                  // slider position as a point on the measure's range
+const view = {
+  focus: () => locked || hovered,
+  rules: [                                                                  // each: (id, attrs) -> keep?  The focus rule stays last.
+    ...measures.map(m => (e, a) => Math.log1p(m.of(a) || 0) >= cutOf(m) - 1e-9),
+    (e, a) => state.all || a.bb !== 0,                                      // backbone only, or every connection
+    (e, a) => !view.focus() || graph.hasExtremity(e, view.focus()),         // focused node's connections only
+  ],
+  includes(e, a) { return this.rules.every(rule => rule(e, a)); },
+  list() { const out = []; graph.forEachEdge((e, a, s, t) => { if (this.includes(e, a)) out.push({ id: e, a, source: s, target: t }); }); return out; },
+};
+
+const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const styles = {
+  // Trace: the line itself. It adds arrowheads when no other style shows direction.
+  trace: {
+    on: true,
+    reduce(r, c) { r.type = styles.flow.on ? "line" : "arrow"; if (view.focus()) { r.color = css("--edge-hi"); r.zIndex = 1; } },
+  },
+  // Flow: a dot is a payment on its way from payer to payee, drawn between the node rims.
+  //   dot size      = mean transfer size on the connection (log scale, ranked within the view)
+  //   how often     = payment count: busy connections send a dot every few seconds, quiet ones every MAX_GAP seconds, so a
+  //                   quiet connection can have nothing in flight for a while ("asleep")
+  //   speed         = the same everywhere (SPEED px/s at default zoom); a trip takes length / SPEED; in-out quad ease
+  // It is a picture of relative activity, not a replay of when payments happened.
+  flow: {
+    on: !reducedMotion, SPEED: 25, R_MIN: 1.5, R_MAX: 5, MIN_GAP: 3, MAX_GAP: 60, MAX_IN_FLIGHT: 5, raf: 0, clock: 0, cache: new Map(),
+    start() {
+      this.stop();
+      if (!this.on || !renderer || !graph) return;
+      this.cache = new Map(); this.scale = this.prepare();
+      let last = performance.now();
+      const frame = (now) => { if (!this.on || !renderer || !graph) return; this.clock += Math.min(0.1, (now - last) / 1000); last = now; this.draw(); this.raf = requestAnimationFrame(frame); };
+      this.raf = requestAnimationFrame(frame);
+    },
+    stop() { cancelAnimationFrame(this.raf); this.raf = 0; const cv = $("flow"); cv.getContext("2d").clearRect(0, 0, cv.width, cv.height); },
+    rank(values) {                                                          // 5th to 95th percentile of log values -> 0..1
+      const v = values.filter(x => x > 0).map(Math.log10).sort((x, y) => x - y);
+      const lo = v.length ? v[Math.floor(v.length * 0.05)] : 0, hi = v.length ? v[Math.floor(v.length * 0.95)] : 1, span = Math.max(hi - lo, 1e-6);
+      return (x) => x > 0 ? Math.min(1, Math.max(0, (Math.log10(x) - lo) / span)) : 0.5;
+    },
+    prepare() {
+      const es = graph.mapEdges((e, a) => a);
+      return { size: this.rank(es.map(a => a.value / a.n)), count: this.rank(es.map(a => a.n)) };
+    },
+    dot(c) {
+      let d = this.cache.get(c.id);
+      if (!d) {
+        let h = 0; for (let k = 0; k < c.id.length; k++) h = (h * 31 + c.id.charCodeAt(k)) >>> 0;
+        const busy = this.scale.count(c.a.n), size = this.scale.size(c.a.value / c.a.n);
+        d = { r: this.R_MIN + size * (this.R_MAX - this.R_MIN),
+              gap: this.MAX_GAP * Math.pow(this.MIN_GAP / this.MAX_GAP, busy),   // seconds between two dots leaving the payer
+              off: (h % 1000) / 1000 * this.MAX_GAP };                            // so connections do not start in step
+        this.cache.set(c.id, d);
+      }
+      return d;
+    },
+    draw() {
+      const cv = $("flow"), ctx = cv.getContext("2d"), dpr = devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
+      if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = css("--edge-hi");
+      const ratio = renderer.getCamera().ratio;                              // a trip is timed in graph space, so zooming never makes dots jump
+      for (const c of view.list()) {
+        const p = renderer.graphToViewport(graph.getNodeAttributes(c.source)), q = renderer.graphToViewport(graph.getNodeAttributes(c.target));
+        const full = Math.hypot(q.x - p.x, q.y - p.y);
+        if (full < 1) continue;
+        const ux = (q.x - p.x) / full, uy = (q.y - p.y) / full;
+        const rs = renderer.scaleSize(renderer.getNodeDisplayData(c.source).size), rt = renderer.scaleSize(renderer.getNodeDisplayData(c.target).size);
+        p.x += ux * rs; p.y += uy * rs; q.x -= ux * rt; q.y -= uy * rt;
+        const dx = q.x - p.x, dy = q.y - p.y;
+        if (full - rs - rt < 8 || (p.x < -50 && q.x < -50) || (p.x > w + 50 && q.x > w + 50) || (p.y < -50 && q.y < -50) || (p.y > h + 50 && q.y > h + 50)) continue;
+        const d = this.dot(c), trip = Math.max(1, full * ratio / this.SPEED);   // seconds from payer to payee
+        const gap = Math.max(d.gap, trip / this.MAX_IN_FLIGHT);                 // never more than MAX_IN_FLIGHT dots on one line
+        for (let age = (this.clock + d.off) % gap; age < trip; age += gap) {     // each age is a payment that left the payer `age` seconds ago
+          const u = age / trip, f = u < 0.5 ? 2 * u * u : 1 - 2 * (1 - u) * (1 - u);   // ease in-out quad
+          ctx.globalAlpha = 0.9 * Math.sin(Math.PI * Math.min(1, u / 0.12, (1 - u) / 0.12) / 2);
+          ctx.beginPath(); ctx.arc(p.x + dx * f, p.y + dy * f, d.r, 0, 6.2832); ctx.fill();
+        }
+      }
+      ctx.globalAlpha = 1;
+    },
+  },
+};
+// A change of filter or style needs one call: the lines are re-reduced by sigma, the dots read `view` on every frame.
+function cutText() {
+  for (const m of measures) {
+    $(m.id + "-out").textContent = !graph ? "" : m.pos > 0 ? ` ≥ ${fmt(Math.expm1(cutOf(m)))} ${m.unit()}` : " no minimum";
+  }
+}
+// Connections that pass every rule except the focus one (the filters, not the hover).
+const keptCount = () => view.rules.slice(0, -1).reduce((l, rule) => l.filter(c => rule(c.id, c.a)), graph.mapEdges((e, a) => ({ id: e, a }))).length;
+function restyle() { cutText(); if (renderer) { renderer.refresh(); styles.flow.on ? (styles.flow.raf || styles.flow.start()) : styles.flow.stop(); legend(); note(); } }
+function setFocus(node) { locked = node; hovered = null; if (renderer) renderer.refresh(); }
 
 function draw(data) {
   if (renderer) { renderer.kill(); renderer = null; }
   graph = graphology.Graph.from(data);
-  const sizes = graph.mapEdges((e, a) => a.size || 1);
-  const maxSize = Math.max(1, ...sizes);
-  const edgeCol = css("--edge"), edgeHi = css("--edge-hi");
+  locked = null; hovered = null;
+  lastDrawn = { view: state.view, label: state.label, month: state.month, centre: state.centre };
+  const edgeCol = css("--edge");
   renderer = new Sigma(graph, $("sigma"), {
-    defaultEdgeType: animOn ? "line" : "arrow", renderEdgeLabels: false, labelFont: "IBM Plex Sans", labelSize: 11,
+    defaultEdgeType: "arrow", renderEdgeLabels: false, labelFont: "IBM Plex Sans", labelSize: 11,
     labelColor: { color: css("--ink-2") }, labelRenderedSizeThreshold: 0, labelGridCellSize: 120, zIndex: true,
     nodeReducer: (n, a) => {
-      const r = { ...a, color: nodeColour(a), label: a.label };
-      if (a.label_rank != null && a.label_rank >= labelLimit && n !== hovered) r.label = null;
-      if (hovered && n !== hovered && !graph.areNeighbors(n, hovered)) { r.color = css("--grid"); r.label = ""; r.zIndex = 0; }
-      if (a.centre || n === hovered) { r.highlighted = true; r.zIndex = 2; }
+      const f = view.focus(), r = { ...a, color: nodeColour(a), label: a.label };
+      if (a.label_rank != null && a.label_rank >= labelLimit && n !== f) r.label = null;
+      if (f && n !== f && !graph.areNeighbors(n, f)) { r.color = css("--grid"); r.label = ""; r.zIndex = 0; }
+      if (a.centre || n === f) { r.highlighted = true; r.zIndex = 2; }
       return r;
     },
     edgeReducer: (e, a) => {
-      const r = { ...a, color: edgeCol, size: Math.max(0.3, a.size * 0.8), type: animOn ? "line" : "arrow" };
-      if (a.size < (state.minw / 100) * maxSize) r.hidden = true;
-      if (!state.all && a.bb === 0) r.hidden = true;
-      if (hovered) { if (graph.hasExtremity(e, hovered)) { r.color = edgeHi; r.zIndex = 1; } else r.hidden = true; }
+      const r = { ...a, color: edgeCol, size: Math.max(0.3, a.size * 0.8) };
+      if (!view.includes(e, a) || !styles.trace.on) r.hidden = true;        // hidden lines do not stop the dots: they read `view`
+      else styles.trace.reduce(r, { id: e, a });
       return r;
     },
   });
   renderer.on("enterNode", ({ node }) => { hovered = node; renderer.refresh(); });
   renderer.on("leaveNode", () => { hovered = null; renderer.refresh(); });
+  // One click locks the focus on a node (the rest of the graph greys out); one click on it again, the background or Esc releases it.
+  // On the community map a second click within CLICK_MS drills down into the community instead.
+  clearTimeout(clickTimer); clickTimer = null;
+  const toggleFocus = (node) => { setFocus(locked === node ? null : node); if (locked) panel(node); };
   renderer.on("clickNode", ({ node }) => {
-    const a = graph.getNodeAttributes(node);
-    if (graph.getAttribute("kind") === "communities" && a.has_detail) openCommunity(node); else panel(node);
+    const drillable = graph.getAttribute("kind") === "communities" && graph.getNodeAttribute(node, "has_detail");
+    if (!drillable) { toggleFocus(node); return; }
+    if (clickTimer && clickedNode === node) { clearTimeout(clickTimer); clickTimer = null; openCommunity(node); return; }
+    clearTimeout(clickTimer); clickedNode = node;
+    clickTimer = setTimeout(() => { clickTimer = null; toggleFocus(node); }, CLICK_MS);
   });
+  renderer.on("clickStage", () => { if (locked) setFocus(null); });
   labelLimit = LABELS_DEFAULT;
   renderer.getCamera().on("updated", ({ ratio }) => {
     const lim = Math.round(LABELS_DEFAULT / Math.min(1, ratio));
     if (lim !== labelLimit) { labelLimit = lim; renderer.refresh(); }
   });
-  note();
-  legend();
-  startFlow();
+  afterGraph();
 }
 
-// Animated flow: dots travel source -> target along each drawn edge. Speed (px/s) follows the mean transfer size
-// on a log scale, the number of dots follows the transfer count. It encodes volume; it is not a replay in time.
-const FLOW_MAX_DOTS = 4000, FLOW_V_MIN = 22, FLOW_V_MAX = 170;
-function flowPrepare() {
-  const ms = [];
-  graph.forEachEdge((e, a) => { if (a.value > 0 && a.n > 0) ms.push(Math.log10(a.value / a.n)); });
-  ms.sort((x, y) => x - y);
-  const lo = ms.length ? ms[Math.floor(ms.length * 0.05)] : 0, hi = ms.length ? ms[Math.floor(ms.length * 0.95)] : 1;
-  return { lo, span: Math.max(hi - lo, 1e-6) };
+// Everything that depends on the graph's connections: slider ranges, counts, legend, dots.
+function afterGraph() {
+  for (const m of measures) {
+    const lw = graph.mapEdges((e, a) => Math.log1p(m.of(a) || 0));
+    m.lo = lw.length ? Math.min(...lw) : 0; m.hi = lw.length ? Math.max(...lw) : 1;
+  }
+  note();
+  legend();
+  cutText();
+  styles.flow.start();
 }
-function flowDot(e, a, sc, i) {
-  const t = a.value > 0 && a.n > 0 ? Math.min(1, Math.max(0, (Math.log10(a.value / a.n) - sc.lo) / sc.span)) : 0.5;
-  let h = 0; for (let k = 0; k < e.length; k++) h = (h * 31 + e.charCodeAt(k)) >>> 0;
-  return { v: FLOW_V_MIN + t * (FLOW_V_MAX - FLOW_V_MIN), k: Math.max(1, Math.min(5, Math.round(1 + Math.log2(a.n || 1) / 2))), off: (h % 1000) / 1000 };
-}
-function startFlow() {
-  cancelAnimationFrame(flowRaf); flowRaf = 0;
-  const cv = $("flow"), ctx = cv.getContext("2d");
-  ctx.clearRect(0, 0, cv.width, cv.height);
-  if (!animOn || !renderer || !graph) return;
-  const sc = flowPrepare(), cache = new Map(), t0 = performance.now();
-  const frame = (now) => {
-    if (!animOn || !renderer || !graph) return;
-    const dpr = devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
-    if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = css("--edge-hi");
-    const secs = (now - t0) / 1000, list = [];
-    graph.forEachEdge((e, a, s, t, sa, ta) => {
-      if (renderer.getEdgeDisplayData(e)?.hidden) return;
-      list.push([e, a, s, t]);
-    });
-    const budget = Math.max(1, Math.floor(FLOW_MAX_DOTS / Math.max(1, list.length)));
-    for (const [e, a, s, t] of list) {
-      const p = renderer.graphToViewport(graph.getNodeAttributes(s)), q = renderer.graphToViewport(graph.getNodeAttributes(t));
-      const dx = q.x - p.x, dy = q.y - p.y, len = Math.hypot(dx, dy);
-      if (len < 12 || (p.x < -50 && q.x < -50) || (p.x > w + 50 && q.x > w + 50) || (p.y < -50 && q.y < -50) || (p.y > h + 50 && q.y > h + 50)) continue;
-      let d = cache.get(e); if (!d) cache.set(e, d = flowDot(e, a, sc));
-      const k = Math.min(d.k, budget), r = 1.6 + d.v / FLOW_V_MAX * 1.2;
-      for (let i = 0; i < k; i++) {
-        const f = (secs * d.v / len + i / k + d.off) % 1;
-        const fade = Math.min(1, f / 0.1, (1 - f) / 0.1);
-        ctx.globalAlpha = 0.25 + 0.7 * fade;
-        ctx.beginPath(); ctx.arc(p.x + dx * f, p.y + dy * f, r, 0, 6.2832); ctx.fill();
-      }
-    }
-    ctx.globalAlpha = 1;
-    flowRaf = requestAnimationFrame(frame);
-  };
-  flowRaf = requestAnimationFrame(frame);
+
+// Month to month on the backbone: the same sigma instance, nodes found in both months glide to their new place and size,
+// new nodes grow in, nodes that left shrink away, and the connections are swapped in when the nodes have settled.
+let lastDrawn = null, morphing = null;
+const MORPH_MS = 700;
+const canMorph = () => !reducedMotion && renderer && graph && !morphing && lastDrawn && state.view === "backbone"
+  && lastDrawn.view === state.view && lastDrawn.label === state.label && lastDrawn.month !== state.month;
+function morph(data) {
+  const next = graphology.Graph.from(data), targets = {}, leaving = [];
+  styles.flow.stop(); locked = null; hovered = null;
+  graph.clearEdges();
+  graph.forEachNode((key) => { if (!next.hasNode(key)) { leaving.push(key); targets[key] = { size: 0 }; graph.setNodeAttribute(key, "label", ""); } });
+  next.forEachNode((key, a) => {
+    if (graph.hasNode(key)) { const { x, y, size, ...rest } = a; graph.mergeNodeAttributes(key, rest); targets[key] = { x, y, size }; }
+    else { graph.addNode(key, { ...a, size: 0 }); targets[key] = { x: a.x, y: a.y, size: a.size }; }
+  });
+  lastDrawn.month = state.month;
+  morphing = { cancel: Sigma.utils.animateNodes(graph, targets, { duration: MORPH_MS, easing: "quadraticInOut" }, () => {
+    morphing = null;
+    leaving.forEach(k => graph.dropNode(k));
+    next.forEachEdge((e, a, s, t) => graph.addEdgeWithKey(e, s, t, a));
+    graph.replaceAttributes(next.getAttributes());
+    afterGraph();
+  }) };
 }
 
 function note() {
   if (!graph) return;
-  const at = graph.getAttributes(), bbN = at.n_backbone_edges, hiddenEdges = at.n_hidden_edges;
-  const drawn = state.all || bbN == null ? graph.size : bbN;
-  $("note").textContent = `${graph.order} nodes · ${drawn.toLocaleString()} edges`
-    + (!state.all && bbN != null && bbN < graph.size ? ` · ${(graph.size - bbN).toLocaleString()} weaker edges hidden` : "")
-    + (hiddenEdges ? ` · ${hiddenEdges.toLocaleString()} lighter edges not loaded` : "");
+  const at = graph.getAttributes(), hiddenEdges = at.n_hidden_edges;
+  const drawn = keptCount();
+  $("note").textContent = `${graph.order} nodes · ${drawn.toLocaleString()} of ${graph.size.toLocaleString()} connections shown`
+    + (hiddenEdges ? ` · ${hiddenEdges.toLocaleString()} lighter connections not loaded` : "");
 }
 
 function crumbs() {
@@ -290,7 +393,7 @@ function crumbs() {
       parts.push(document.createTextNode(` › ${(s.centre || "").slice(0, 10)}…`));
     }
   } else {
-    const names = { backbone: "Backbone", communities: "Community map", ego: "Ego view", loops: "Loops over time" };
+    const names = { backbone: "Backbone", communities: "Community map", ego: "Ego view", periods: "By period", loops: "Loops over time" };
     parts.push(document.createTextNode(names[s.view] + (s.view === "ego" && s.centre ? ` › ${s.centre.slice(0, 10)}…` : "")));
   }
   el.replaceChildren(...parts);
@@ -298,7 +401,7 @@ function crumbs() {
 
 function navigate(change) {
   Object.assign(state, change);
-  $("view").value = state.view;
+  $("view").value = state.view; setMonth(state.month);
   render(true);
 }
 
@@ -308,12 +411,12 @@ function openCommunity(node) {
 }
 
 function panel(node) {
-  const a = graph.getNodeAttributes(node), kind = graph.getAttribute("kind"), unit = state.label === "all" ? "transfers" : state.label.split("-")[0];
+  const a = graph.getNodeAttributes(node), kind = graph.getAttribute("kind"), unit = state.label.split("-")[0];
   const rows = kind === "communities"
     ? [["Entities", a.n_entities?.toLocaleString()], ["Largest members", (a.top_entities || []).map(x => `<code>${x.slice(0, 10)}…</code>`).join("<br>")]]
     : [["Role", (a.role || "unknown").replace("_", " ")], ["Accounts in entity", a.n_accounts], ["Community", a.community ?? "–"],
        ["Bow-tie part", a.bowtie], ["PageRank", fmt(a.pagerank)], ["Transfers in / out", `${fmt(a.in_n)} / ${fmt(a.out_n)}`],
-       ...(state.label !== "all" ? [[`Value in / out (${unit})`, `${fmt(a.in_value)} / ${fmt(a.out_value)}`]] : []),
+       [`Value in / out (${unit})`, `${fmt(a.in_value)} / ${fmt(a.out_value)}`],
        ["Flow Index A1 / A2", `${fmt(a.flow_in)} / ${fmt(a.flow_out)}`], ...(a.ppr != null ? [["Personalized PageRank", fmt(a.ppr)]] : [])];
   const top = graph.edges(node).map(e => [e, graph.getEdgeAttributes(e)]).sort((x, y) => (y[1].n || 0) - (x[1].n || 0)).slice(0, 5);
   const tx = top.flatMap(([e, ea]) => (ea.hashes || []).slice(0, 1).map(h =>
@@ -342,13 +445,18 @@ function openEgo(centre) {
 async function render(push) {
   writeHash(push);
   crumbs();
-  const loops = state.view === "loops";
+  const loops = state.view === "loops" || state.view === "periods";
   $("loops").style.display = loops ? "block" : "none";
   $("stage").style.display = $("panel").style.display = loops ? "none" : "";
-  if (loops) return drawLoops();
+  if (loops) return state.view === "periods" ? drawPeriods() : drawLoops();
   let v;
   if (state.view === "ego") {
-    const egos = INDEX.views.filter(x => x.kind === "ego" && x.month === state.month && x.label === state.label);
+    const egoViews = (m) => INDEX.views.filter(x => x.kind === "ego" && x.month === m && x.label === state.label);
+    let egos = egoViews(state.month);
+    if (!egos.length) {                                                       // not every month has ego views: move to the latest one that does
+      const m = INDEX.views.filter(x => x.kind === "ego" && x.label === state.label).map(x => x.month).sort().pop();
+      if (m) { egoNote = `No ego views for ${state.month}; showing ${m}.`; state.month = m; setMonth(m); egos = egoViews(m); }
+    }
     $("egolist").innerHTML = egos.map(x => `<option value="${x.centre}">`).join("");
     v = egos.find(x => x.centre === state.centre) || egos[0];
     if (v) state.centre = v.centre;
@@ -369,11 +477,67 @@ async function render(push) {
   } else {
     v = INDEX.views.find(x => x.kind === state.view && x.month === state.month && x.label === state.label);
   }
-  if (!v) { if (renderer) renderer.kill(); renderer = null; graph = null; $("note").textContent = "No view for this month and asset."; return; }
+  if (!v) {
+    if (renderer) renderer.kill(); renderer = null; graph = null; styles.flow.stop();
+    $("note").textContent = "";
+    $("panel").innerHTML = `<p class="hint">No ${state.view} view for ${state.month} and ${state.label}.${state.view === "ego" ? " Ego views are built for chosen entities only." : ""}</p>`;
+    return;
+  }
   const data = await (await fetch("graph/" + v.file)).json();
-  draw(data);
-  if (state.view !== "ego") $("panel").innerHTML = '<p class="hint">Hover a node to see its neighbours. Click it for details' + (state.view === "communities" ? ", or to open the community." : " and sample transactions.") + "</p>";
+  if (morphing) { morphing.cancel(); morphing = null; lastDrawn = null; }      // a new request while one is still moving: start clean
+  if (canMorph()) morph(data); else draw(data);
+  if (state.view === "ego") { panel(state.centre); if (egoNote) { $("panel").insertAdjacentHTML("afterbegin", `<p class="hint">${egoNote}</p>`); egoNote = ""; } }
+  else $("panel").innerHTML = '<p class="hint">Hover a node to see its neighbours. Click it for details' + (state.view === "communities" ? ", and it stays isolated; click it again to release it, or double-click to open the community." : " and sample transactions.") + "</p>";
   writeHash(); crumbs();
+}
+
+// By period: one bar per month, or per year, for the selected asset. The date selector switches the grain.
+// Counts of transfers add up over a year; every other measure is the average of that year's months.
+const PERIOD_METRICS = {
+  n_transfers: { label: "Transfers", sum: true, f: fmt },
+  n_nodes: { label: "Entities", f: fmt }, n_edges: { label: "Connections", f: fmt }, n_communities: { label: "Communities", f: fmt },
+  modularity: { label: "Modularity", f: (v) => v.toFixed(2) },
+  loop_share: { label: "Share of flow in loops", f: (v) => (v * 100).toFixed(1) + "%" },
+  reciprocity: { label: "Reciprocity", f: (v) => (v * 100).toFixed(1) + "%" },
+  giant_wcc_share: { label: "Entities in the largest component", f: (v) => (v * 100).toFixed(1) + "%" },
+};
+let periodGrain = "month", periodMetric = "n_transfers";
+async function drawPeriods() {
+  const el = $("loops");
+  let d;
+  try { d = await (await fetch("graph/loops.json")).json(); } catch { el.innerHTML = '<p class="empty">No monthly data yet.</p>'; return; }
+  const rows = d.summary.filter(r => r.asset_label === state.label);
+  const m = PERIOD_METRICS[periodMetric];
+  const groups = new Map();
+  for (const r of rows) { const k = periodGrain === "year" ? r.month.slice(0, 4) : r.month; (groups.get(k) || groups.set(k, []).get(k)).push(r); }
+  const bars = [...groups].sort((a, b) => a[0].localeCompare(b[0])).map(([k, rs]) => {
+    const vals = rs.map(r => r[periodMetric]).filter(v => v != null);
+    const v = vals.length ? vals.reduce((a, b) => a + b, 0) / (m.sum ? 1 : vals.length) : null;
+    return { k, v, months: rs.map(r => r.month).sort() };
+  });
+  const sel = (id, opts, cur) => `<select id="${id}">${opts.map(([v, l]) => `<option value="${v}"${v === cur ? " selected" : ""}>${l}</option>`).join("")}</select>`;
+  const head = `<div style="display:flex;flex-wrap:wrap;gap:8px 16px;align-items:end;margin-bottom:8px">
+    <label style="display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--ink-2)">Date ${sel("pgrain", [["month", "By month"], ["year", "By year"]], periodGrain)}</label>
+    <label style="display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--ink-2)">Measure ${sel("pmetric", Object.entries(PERIOD_METRICS).map(([k, x]) => [k, x.label]), periodMetric)}</label></div>`;
+  const note = periodGrain === "year" ? (m.sum ? "Sum of the months in the data." : "Average of the months in the data.")
+    + " A year with fewer than 12 months covers only the months available." : "";
+  const W = 900, H = 300, L = 64, R = 16, T = 16, B = 34, ink2 = css("--ink-2"), grid = css("--grid"), muted = css("--muted");
+  const max = Math.max(1e-9, ...bars.map(b => b.v || 0)), bw = (W - L - R) / Math.max(1, bars.length);
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${m.label} by ${periodGrain}">`;
+  for (const t of [0, 0.5, 1]) { const y = T + (1 - t) * (H - T - B); svg += `<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" stroke="${grid}"/><text x="${L - 8}" y="${y + 4}" text-anchor="end" font-size="11" fill="${muted}">${m.f(max * t)}</text>`; }
+  bars.forEach((b, i) => {
+    const h = b.v == null ? 0 : (b.v / max) * (H - T - B), x = L + i * bw + bw * 0.15;
+    svg += `<rect class="pbar" data-i="${i}" x="${x}" y="${H - B - h}" width="${bw * 0.7}" height="${h}" rx="3" fill="${css("--c1")}" style="cursor:pointer"><title>${b.k}: ${b.v == null ? "–" : m.f(b.v)}</title></rect>`;
+    if (bars.length <= 14 || i % Math.ceil(bars.length / 10) === 0) svg += `<text x="${x + bw * 0.35}" y="${H - 12}" text-anchor="middle" font-size="11" fill="${muted}">${b.k}</text>`;
+  });
+  svg += "</svg>";
+  el.innerHTML = `<h2 style="font:600 16px var(--display);margin:0 0 8px">${m.label} by ${periodGrain}, ${state.label}</h2>${head}
+    <p class="sub" style="margin:0 0 8px">${note} Click a bar to open that ${periodGrain === "year" ? "year's latest month" : "month"} in the backbone view.</p>${svg}`;
+  $("pgrain").onchange = (e) => { periodGrain = e.target.value; drawPeriods(); };
+  $("pmetric").onchange = (e) => { periodMetric = e.target.value; drawPeriods(); };
+  el.querySelectorAll(".pbar").forEach(r => r.addEventListener("click", () => {
+    const b = bars[+r.dataset.i]; navigate({ view: "backbone", month: b.months[b.months.length - 1], centre: undefined, comm: undefined, from: undefined });
+  }));
 }
 
 async function drawLoops() {
@@ -416,42 +580,41 @@ async function drawLoops() {
 
 function fillSelects() {
   const months = [...new Set(INDEX.views.map(v => v.month))].sort();
-  const labels = [...new Set(INDEX.views.map(v => v.label))].sort((a, b) => (a === "XRP" ? -1 : b === "XRP" ? 1 : a.localeCompare(b)));
-  $("month").innerHTML = months.map(m => `<option>${m}</option>`).join("");
+  const labels = [...new Set(INDEX.views.map(v => v.label))].filter(l => l !== "all").sort((a, b) => (a === "XRP" ? -1 : b === "XRP" ? 1 : a.localeCompare(b)));
+  MONTHS = months; $("month").max = months.length - 1;
   $("asset").innerHTML = labels.map(l => `<option>${l}</option>`).join("");
   const h = readHash();
-  const views = ["backbone", "communities", "community", "ego", "loops"];
+  const views = ["backbone", "communities", "community", "ego", "periods", "loops"];
   state = { view: views.includes(h.view) ? h.view : "backbone", month: months.includes(h.month) ? h.month : months[months.length - 1],
             label: labels.includes(h.label) ? h.label : labels[0], centre: h.view === "ego" ? h.arg : undefined,
-            comm: h.view === "community" ? h.arg : undefined, all: h.all, colour: "role", minw: 0 };
-  $("month").value = state.month; $("asset").value = state.label; $("view").value = state.view; $("alledges").checked = !!state.all;
+            comm: h.view === "community" ? h.arg : undefined, all: h.all, colour: "role" };
+  setMonth(state.month); $("asset").value = state.label; $("view").value = state.view; $("alledges").checked = !!state.all;
 }
 
+$("month").addEventListener("input", (e) => { $("monthout").textContent = ` ${MONTHS[+e.target.value]}`; });   // the label follows the thumb; the view loads on release
 for (const id of ["month", "asset", "view"]) $(id).addEventListener("change", (e) => {
-  state[id === "asset" ? "label" : id] = e.target.value;
+  state[id === "asset" ? "label" : id] = id === "month" ? MONTHS[+e.target.value] : e.target.value;
   if (id !== "view") { state.centre = undefined; state.comm = undefined; }
   state.from = undefined;
   render(true); });
-$("alledges").addEventListener("change", (e) => { state.all = e.target.checked; writeHash(); if (renderer) { renderer.refresh(); note(); } });
+$("alledges").addEventListener("change", (e) => { state.all = e.target.checked; writeHash(); restyle(); });
 window.addEventListener("popstate", () => {
   const h = readHash();
   if (!h.view) return;
-  Object.assign(state, { view: h.view, month: h.month || state.month, label: h.label || state.label,
+  Object.assign(state, { view: h.view, month: h.month || state.month, label: [...$("asset").options].some(o => o.value === h.label) ? h.label : state.label,
     centre: h.view === "ego" ? h.arg : undefined, comm: h.view === "community" ? h.arg : undefined, all: h.all, from: undefined });
-  $("month").value = state.month; $("asset").value = state.label; $("view").value = state.view; $("alledges").checked = !!state.all;
+  setMonth(state.month); $("asset").value = state.label; $("view").value = state.view; $("alledges").checked = !!state.all;
   render();
 });
-$("animate").checked = animOn;
-$("animate").addEventListener("change", (e) => {
-  animOn = e.target.checked;
-  if (renderer) { renderer.setSetting("defaultEdgeType", animOn ? "line" : "arrow"); renderer.refresh(); legend(); }
-  startFlow();
-});
+$("trace").addEventListener("change", (e) => { styles.trace.on = e.target.checked; restyle(); });
+$("animate").checked = styles.flow.on;
+$("animate").addEventListener("change", (e) => { styles.flow.on = e.target.checked; restyle(); });
+addEventListener("keydown", (e) => { if (e.key === "Escape" && locked) setFocus(null); });
 $("colour").addEventListener("change", (e) => { state.colour = e.target.value; if (renderer) { renderer.refresh(); legend(); } });
-$("minw").addEventListener("input", (e) => { state.minw = +e.target.value; if (renderer) renderer.refresh(); });
+for (const m of measures) $(m.id).addEventListener("input", (e) => { m.pos = +e.target.value; restyle(); });
 $("search").addEventListener("change", (e) => {
   const q = e.target.value.trim(); if (!q) return;
-  if (graph && graph.hasNode(q) && state.view !== "ego") { panel(q); hovered = q; renderer.refresh(); return; }
+  if (graph && graph.hasNode(q) && state.view !== "ego") { panel(q); setFocus(q); return; }
   const v = INDEX.views.find(x => x.kind === "ego" && x.month === state.month && x.label === state.label && x.centre === q);
   if (v) navigate({ view: "ego", centre: q, from: undefined }); else $("panel").innerHTML = `<p class="hint">No precomputed ego view for <code>${q}</code> in ${state.month}. Accounts inside a grouped entity use the entity id. Build one with<br><code>uv run graph/run.py ego ${q} --month ${state.month}</code></p>`;
 });
@@ -459,7 +622,7 @@ matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if
 
 if (window.INLINE_GRAPH) {
   $("controls").style.display = "none"; $("subtitle").textContent = window.INLINE_NOTE || "";
-  state = { colour: "role", minw: 0, label: "XRP" }; draw(window.INLINE_GRAPH);
+  state = { colour: "role", label: "XRP" }; draw(window.INLINE_GRAPH);
 } else {
   fetch("graph/index.json").then(r => r.json()).then(d => { INDEX = d; fillSelects(); render(); })
     .catch(() => { $("stage").innerHTML = '<p class="empty">No graph views yet: run <code>uv run graph/run.py all</code>.</p>'; });

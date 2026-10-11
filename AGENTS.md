@@ -99,6 +99,7 @@ The Graph tab was an unreadable hairball (2026-09 XRP backbone: 1,414 overlappin
 overlap removal (0 overlaps), disparity-filtered edges (about 500 of 3,200 drawn), 30 labels at default zoom,
 rule-based community names, community drill-down. Spike: `docs/graph-layout-spike.md`. **No AI in the product**:
 nothing a reader sees is model-generated; Claude is used to build and check the code (`graph/preview.py`).
+Page behaviour, rebuild steps and what is still unverified: `docs/graph-handoff-2026-10-11.md`.
 
 ### 12-month backfill — **finished** 2026-10-01 12:38 UTC
 

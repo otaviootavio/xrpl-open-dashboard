@@ -61,8 +61,17 @@ uv run ops/stage_graph_site.py --out <scratch dir>   # published copy + publish_
 - **Edges** (`backbone.keep_mask`): disparity filter (alpha 0.05, stepping down to fit the cap) + each node's
   strongest edge + a maximum spanning forest, so views stay connected. Caps: backbone 1,000, ego 200,
   community bundle 400. Kept edges have `bb = 1`; the layout uses only those; "Show all edges" draws the rest.
-  Edges are drawn as animated dots (canvas overlay in `graph.html`, no data change): speed = log of mean transfer size (`value/n`),
-  dot count = log of transfer count `n`. It encodes volume, not timing. "Animate flow" off (or reduced motion) falls back to arrowheads.
+  `graph.html` treats every edge as a connection: `view.rules` (min total value moved, min total payments, backbone/all, focused node; each slider runs linearly over log(1 + number) between the lightest and heaviest connection in the view and the page prints the cut-off) decide which are in view,
+  and independent styles (`styles.trace` line, `styles.flow` dots) decide how they look. A click locks the focus on a node (click it
+  again, the background or Esc releases it). Add a rule or a style there, never a special case in the other.
+  Edges are drawn as animated dots (canvas overlay in `graph.html`, no data change): a dot is a payment on its way.
+  Dot size = log of mean transfer size (`value/n`); how often dots leave the payer = payment count `n` (every 3 s for the busiest
+  connections to every 60 s for the quietest, so quiet ones are sometimes asleep with nothing in flight); speed is the same
+  everywhere (25 px/s at default zoom, in-out quad ease, at most 5 dots per line). It shows relative activity, not timing.
+  The page has no all-assets view (amounts of different tokens do not add up); the pipeline still builds it and the staging script leaves it out.
+  Changing the month on the backbone view animates instead of reloading (`morph()` in `graph.html`, `Sigma.utils.animateNodes`, 700 ms):
+  nodes in both months glide, new ones grow in, leaving ones shrink, connections swap in at the end. Layouts are computed per month, so a
+  node can travel far; seeding each month's layout from the previous one (graph/layout.py start positions) would calm that, at the cost of a full rebuild.
   Sample hashes are looked up for `bb` edges only (the lookup scans a month of silver transfers).
 - **Names** (`names.py`): role word of the community's top-PageRank member + its 8-char id, e.g.
   "Exchange hub · rLHzPsX6"; summary = size, share kept inside, largest outflow.
