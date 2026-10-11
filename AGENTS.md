@@ -27,7 +27,8 @@ Human docs: `README.md`. Findings so far: `docs/spike-2026-09-28-xrpl-history.md
 | `ops/forward_export.sh` | Exports new ledgers after the newest on disk (public servers), then runs `pipeline/run.py update`. Meant for cron every 10 min; **not installed in crontab yet** |
 | `pipeline/` | Silver and gold tiers: `run.py` (update, rebuild, check, compact, status), `tiers.py`, `sql/`, `checks.py`, `tests/`. How-to: `.claude/skills/xrpl-medallion/SKILL.md` |
 | `report/build_dashboard.py` + `report/dashboard_template.html` | The 21-analysis dashboard (`report/dashboard.html`). `--from-gold` reads the gold tier via `report/dashboard_gold.py` (about 1 s); without it, it scans bronze (2.5 h) |
-| `graph/` | Transfer graph stage: `run.py` (status, firstlook, entities, metrics, views, all, ego), `entities.py`, `metrics.py`, `hodge.py`, `tails.py`, `views.py`, `tests/`. How-to: `.claude/skills/xrpl-graph/SKILL.md` |
+| `graph/` | Transfer graph stage: `run.py` (status, firstlook, entities, metrics, views, all, ego), `entities.py`, `metrics.py`, `hodge.py`, `tails.py`, `views.py` (+ `layout.py`, `backbone.py`, `names.py` for readable views), `preview.py` (PNG check), `tests/`. How-to: `.claude/skills/xrpl-graph/SKILL.md` |
+| `ops/stage_graph_site.py` | Stages the published Graph tab copy and plans the artifact publishes within limits |
 | `report/graph.html` + `report/graph/` + `report/vendor/` | Graph page (sigma.js 3.0.2, graphology 0.26.0, vendored with hashes in `vendor/VERSIONS`) drawing precomputed JSON views; `report/graph_proto.html` is the self-contained E2 prototype |
 | `docs/` | Spike reports and write-ups |
 | `.claude/skills/` | Agent Skills (open `SKILL.md` format) for repeatable procedures |
@@ -90,6 +91,14 @@ n_transfers sum equals the 18,929,073 non-self transfers. Only 56% of Sept accou
 (have `funded_by`); the top funders created 34–79k accounts each (exchanges activating customers), so "same funder"
 must never mean "same entity" on its own. Graph state goes in `pipeline/graph_state.duckdb` (DuckDB is single-writer;
 run.py holds state.duckdb). No Node.js on the host: vendor prebuilt sigma.js/graphology files.
+
+### Graph readability (built 2026-10-11)
+
+PRD: "PRD: XRPL Graph Readability" (tabs PRD, Architecture, Epics and stories, Technical spec) (link in AGENTS.local.md).
+The Graph tab was an unreadable hairball (2026-09 XRP backbone: 1,414 overlapping node pairs). Now: ForceAtlas2 +
+overlap removal (0 overlaps), disparity-filtered edges (about 500 of 3,200 drawn), 30 labels at default zoom,
+rule-based community names, community drill-down. Spike: `docs/graph-layout-spike.md`. **No AI in the product**:
+nothing a reader sees is model-generated; Claude is used to build and check the code (`graph/preview.py`).
 
 ### 12-month backfill — **finished** 2026-10-01 12:38 UTC
 

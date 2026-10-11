@@ -20,13 +20,14 @@ import pyarrow as pa  # noqa: E402
 import pyarrow.parquet as pq  # noqa: E402
 
 GRAPH_VERSION = "1.1"  # 1.1: funding rule keeps one creation per account
+VIEWS_VERSION = "2"    # views step only; 2: readable views (FA2 + overlap removal, disparity edges, names, bundles)
 SEED = 20261010
 DATA = Path(os.environ.get("XRPL_DATA", "/local/data/xrpl"))
 RLUSD = "524C555344000000000000000000000000000000.rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De"
 ALL = "*"                      # all assets together: counts only
 EXTRA_ASSETS = 8               # assets analysed besides XRP and RLUSD, by transfer count
 SIG_DIGITS = 12                # floats written by graph code are rounded to this many significant digits
-RSS_LIMIT_MB = 6144
+RSS_LIMIT_MB = int(os.environ.get("GRAPH_RSS_LIMIT_MB", "6144"))  # raise for one-off runs on big months
 
 log = logging.getLogger("graph")
 

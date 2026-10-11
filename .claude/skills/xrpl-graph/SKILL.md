@@ -20,7 +20,13 @@ silver transfers ──(pipeline/run.py, SQL)──> gold transfer_edges_monthly
                          gold graph_entities, graph_entity_edges
                        graph/run.py metrics  ──> gold graph_nodes, graph_communities, graph_cycles, graph_summary
                        graph/run.py views    ──> report/graph/*.json  (drawn by report/graph.html)
+                         uses graph/layout.py (E7), graph/backbone.py (E8), graph/names.py (E9)
 ```
+
+Readability design (E7-E10): the doc "PRD: XRPL Graph Readability" (tabs PRD, Architecture, Epics and stories,
+Technical spec), linked from AGENTS.local.md; spike results in `docs/graph-layout-spike.md`.
+**No AI in the product**: names, summaries and layouts are computed from the data. AI (Claude) is a development
+tool here: write the code, then render previews and look at them (below).
 
 ## Safety (live mainnet validator)
 
@@ -40,7 +46,31 @@ uv run graph/run.py firstlook --month 2026-09       # account-level hubs/tails -
 uv run graph/run.py ego rADDRESS --month 2026-09 --asset XRP   # one ego view on demand
 uv run pipeline/run.py regold --gold transfer_edges_monthly --months 2026-09   # rebuild edges for a month
 uv run pytest pipeline/tests/test_edges.py graph/tests -q
+uv run graph/preview.py report/graph/backbone_2026-09_XRP.json /tmp/bb.png     # PNG at the reference stage + overlap/label counts
+uv run graph/preview.py report/graph/community_detail_2026-09_XRP.json /tmp/c.png --community C0
+uv run ops/stage_graph_site.py --out <scratch dir>   # published copy + publish_plan.json (artifact limits checked)
 ```
+
+## Readable views (E7-E10)
+
+- **Layout** (`layout.place`): ForceAtlas2 (LinLog) from the previous month's positions, then `remove_overlaps`
+  in the normalised frame, where 1 unit = `PX_PER_UNIT` (320) px on the 1,000 x 700 reference stage. Zero
+  overlaps at default zoom is the target and is logged per view. Sizes 3 to 18 px (`node_sizes`, sqrt scale).
+- **Labels**: nodes carry `label_rank`; the page shows rank < 30 at default zoom and more as you zoom in.
+  Entity labels are the first 8 characters of the entity id (the role is the colour).
+- **Edges** (`backbone.keep_mask`): disparity filter (alpha 0.05, stepping down to fit the cap) + each node's
+  strongest edge + a maximum spanning forest, so views stay connected. Caps: backbone 1,000, ego 200,
+  community bundle 400. Kept edges have `bb = 1`; the layout uses only those; "Show all edges" draws the rest.
+  Edges are drawn as animated dots (canvas overlay in `graph.html`, no data change): speed = log of mean transfer size (`value/n`),
+  dot count = log of transfer count `n`. It encodes volume, not timing. "Animate flow" off (or reduced motion) falls back to arrowheads.
+  Sample hashes are looked up for `bb` edges only (the lookup scans a month of silver transfers).
+- **Names** (`names.py`): role word of the community's top-PageRank member + its 8-char id, e.g.
+  "Exchange hub · rLHzPsX6"; summary = size, share kept inside, largest outflow.
+- **Bundles**: `community_detail_<month>_<label>.json` holds the 10 largest communities, each a group of up to
+  150 entities grown from its top entity along the strongest ties (`views.grow`).
+- **Versioning**: view-only changes bump `VIEWS_VERSION` in `common.py` (rebuilds views, skips entities and
+  metrics); `GRAPH_VERSION` rebuilds everything.
+- Page URL hash: `#<view>~<month>~<label>[~<arg>][~all]` (arg = `C<n>` or an entity id); Back works.
 
 `ops/forward_export.sh` runs `graph/run.py all` for the open month once an hour (minute < 10).
 
@@ -53,7 +83,10 @@ uv run pytest pipeline/tests/test_edges.py graph/tests -q
 | `graph/load.py` | A month of edges (account or entity level, one asset or `*`) as sorted integer arrays / igraph |
 | `graph/entities.py` | E3 rules (issuer, funding), union-find, size cap and hub guard, entity edges |
 | `graph/metrics.py` | E4 metrics per asset; `graph/hodge.py` (net flow, CG on the Laplacian), `graph/tails.py` (power-law fits) |
-| `graph/views.py` | E5 view JSON (backbone, communities, ego, loops, index) |
+| `graph/views.py` | E5 view JSON (backbone, communities, community bundles, ego, loops, index) |
+| `graph/layout.py`, `graph/backbone.py`, `graph/names.py` | E7 layout + overlap removal, E8 edge filter, E9 community names |
+| `graph/preview.py` | Development aid: render a view to PNG and count overlaps / label collisions |
+| `ops/stage_graph_site.py` | Stage the published copy and plan the artifact publishes |
 | `graph/firstlook.py` | E2 account-level first look + `report/graph_proto.html` |
 | `report/graph.html` + `report/vendor/` | The page (sigma.js 3.0.2 + graphology 0.26.0, versions and hashes in `vendor/VERSIONS`) |
 

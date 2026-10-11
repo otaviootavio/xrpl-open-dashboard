@@ -60,6 +60,7 @@
     color: var(--ink-2); background: color-mix(in srgb, var(--surface) 88%, transparent); padding: 6px 8px; border-radius: 6px; max-width: calc(100% - 24px); }
   #legend span { display: inline-flex; align-items: center; gap: 6px; }
   #legend i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  #flow { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
   #note { position: absolute; right: 12px; top: 10px; font-size: 12px; color: var(--muted); }
   #panel { padding: 14px 16px; overflow: auto; max-height: min(72vh, 760px); }
   #panel h2 { font: 600 16px/1.25 var(--display); margin: 0 0 8px; word-break: break-all; }
@@ -76,6 +77,12 @@
   .tip { position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
     padding: 6px 8px; font-size: 12px; color: var(--ink); box-shadow: 0 2px 8px rgba(0,0,0,.12); display: none; white-space: nowrap; }
   .empty { padding: 40px 16px; color: var(--ink-2); text-align: center; }
+  #crumbs { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; font-size: 13px; color: var(--ink-2); min-height: 20px; }
+  #crumbs button { border: 0; background: none; padding: 0; min-height: 0; color: var(--accent-ink); font: inherit; cursor: pointer; text-decoration: underline; }
+  #crumbs span.sep { color: var(--muted); }
+  .switch { flex-direction: row !important; align-items: center; gap: 6px !important; min-height: 34px; }
+  .switch input { accent-color: var(--s1); width: 16px; height: 16px; margin: 0; }
+  #panel .summary { color: var(--ink-2); font-size: 13px; margin: -4px 0 12px; }
 </style>
 </head>
 <body>
@@ -89,17 +96,22 @@
   <label>View <select id="view">
     <option value="backbone">Backbone (top 300)</option>
     <option value="communities">Community map</option>
+    <option value="community">One community</option>
     <option value="ego">Ego view</option>
     <option value="loops">Loops over time</option>
   </select></label>
   <label>Colour by <select id="colour"><option value="role">Role</option><option value="community">Community</option></select></label>
   <label>Min edge weight <input type="range" id="minw" min="0" max="100" value="0"></label>
+  <label class="switch"><input type="checkbox" id="alledges"> Show all edges</label>
+  <label class="switch"><input type="checkbox" id="animate"> Animate flow</label>
   <label>Find an account <input type="search" id="search" placeholder="r… address or entity id" list="egolist"></label>
   <datalist id="egolist"></datalist>
 </div>
 <main>
+  <nav id="crumbs" aria-label="Where you are"></nav>
   <section class="card" id="stage">
     <div id="sigma" role="img" aria-label="Network graph of transfers"></div>
+    <canvas id="flow" aria-hidden="true"></canvas>
     <div id="legend"></div>
     <div id="note"></div>
   </section>
@@ -117,17 +129,32 @@ const fmt = (x, d = 3) => x == null ? "–" : Math.abs(x) >= 1e6 ? (x / 1e6).toF
   ? (x / 1e3).toFixed(1) + " k" : (+x).toPrecision(d).replace(/\.?0+$/, "");
 const ROLE_COLOURS = [["issuer", "--c1", "Issuer"], ["likely_custodial", "--c2", "Likely custodial"], ["amm_pool", "--c3", "AMM pool"]];
 const EXPLORER = "https://livenet.xrpl.org/transactions/";
+let animOn = !matchMedia("(prefers-reduced-motion: reduce)").matches, flowEdges = [], flowRaf = 0;
 let INDEX = { views: [] }, renderer = null, graph = null, hovered = null, state = {};
+
+const LABELS_DEFAULT = 30;                 // labels at default zoom; graph/layout.py LABELS_DEFAULT
+let bundles = new Map(), labelLimit = LABELS_DEFAULT;
 
 function readHash() {
   // "~"-separated: only plain #anchors (letters, digits, . _ ~ -) reach a published page
-  const [view, month, label, centre] = location.hash.slice(1).split("~");
-  return { view, month, label, centre };
+  // #<view>~<month>~<label>[~<arg>][~all]; arg = C<n> for one community, the entity id for an ego view
+  const parts = location.hash.slice(1).split("~");
+  const all = parts[parts.length - 1] === "all";
+  if (all) parts.pop();
+  const [view, month, label, arg] = parts;
+  return { view, month, label, arg, all };
 }
-function writeHash() {
-  const s = state; const parts = [s.view, s.month, s.label];
+function hashOf(s) {
+  const parts = [s.view, s.month, s.label];
   if (s.view === "ego" && s.centre) parts.push(s.centre);
-  history.replaceState(null, "", "#" + parts.join("~"));
+  if (s.view === "community" && s.comm) parts.push(s.comm);
+  if (s.all) parts.push("all");
+  return "#" + parts.join("~");
+}
+function writeHash(push) {
+  const h = hashOf(state);
+  if (h === location.hash) return;
+  if (push) history.pushState(null, "", h); else history.replaceState(null, "", h);
 }
 
 function nodeColour(attrs) {
@@ -145,7 +172,8 @@ function legend() {
   const items = state.colour === "community" || kind === "communities"
     ? [["--c1", "Community 0 (largest)"], ["--c2", "Community 1"], ["--c3", "Community 2"], ["--c-other", "Smaller communities"]]
     : [...ROLE_COLOURS.map(([, v, l]) => [v, l]), ["--c-other", "Hub, bot pair or unknown"]];
-  el.innerHTML = items.map(([v, l]) => `<span><i style="background:${css(v)}"></i>${l}</span>`).join("");
+  el.innerHTML = items.map(([v, l]) => `<span><i style="background:${css(v)}"></i>${l}</span>`).join("")
+    + (animOn ? "<span>Dots move from payer to payee: faster = larger average transfer, more dots = more transfers</span>" : "");
 }
 
 function draw(data) {
@@ -155,27 +183,128 @@ function draw(data) {
   const maxSize = Math.max(1, ...sizes);
   const edgeCol = css("--edge"), edgeHi = css("--edge-hi");
   renderer = new Sigma(graph, $("sigma"), {
-    defaultEdgeType: "arrow", renderEdgeLabels: false, labelFont: "IBM Plex Sans", labelSize: 11,
-    labelColor: { color: css("--ink-2") }, labelRenderedSizeThreshold: 9, zIndex: true,
+    defaultEdgeType: animOn ? "line" : "arrow", renderEdgeLabels: false, labelFont: "IBM Plex Sans", labelSize: 11,
+    labelColor: { color: css("--ink-2") }, labelRenderedSizeThreshold: 0, labelGridCellSize: 120, zIndex: true,
     nodeReducer: (n, a) => {
       const r = { ...a, color: nodeColour(a), label: a.label };
+      if (a.label_rank != null && a.label_rank >= labelLimit && n !== hovered) r.label = null;
       if (hovered && n !== hovered && !graph.areNeighbors(n, hovered)) { r.color = css("--grid"); r.label = ""; r.zIndex = 0; }
       if (a.centre || n === hovered) { r.highlighted = true; r.zIndex = 2; }
       return r;
     },
     edgeReducer: (e, a) => {
-      const r = { ...a, color: edgeCol, size: Math.max(0.3, a.size * 0.8) };
+      const r = { ...a, color: edgeCol, size: Math.max(0.3, a.size * 0.8), type: animOn ? "line" : "arrow" };
       if (a.size < (state.minw / 100) * maxSize) r.hidden = true;
+      if (!state.all && a.bb === 0) r.hidden = true;
       if (hovered) { if (graph.hasExtremity(e, hovered)) { r.color = edgeHi; r.zIndex = 1; } else r.hidden = true; }
       return r;
     },
   });
   renderer.on("enterNode", ({ node }) => { hovered = node; renderer.refresh(); });
   renderer.on("leaveNode", () => { hovered = null; renderer.refresh(); });
-  renderer.on("clickNode", ({ node }) => panel(node));
-  const hiddenEdges = data.attributes && data.attributes.n_hidden_edges;
-  $("note").textContent = `${graph.order} nodes · ${graph.size} edges` + (hiddenEdges ? ` · ${hiddenEdges.toLocaleString()} lighter edges not shown` : "");
+  renderer.on("clickNode", ({ node }) => {
+    const a = graph.getNodeAttributes(node);
+    if (graph.getAttribute("kind") === "communities" && a.has_detail) openCommunity(node); else panel(node);
+  });
+  labelLimit = LABELS_DEFAULT;
+  renderer.getCamera().on("updated", ({ ratio }) => {
+    const lim = Math.round(LABELS_DEFAULT / Math.min(1, ratio));
+    if (lim !== labelLimit) { labelLimit = lim; renderer.refresh(); }
+  });
+  note();
   legend();
+  startFlow();
+}
+
+// Animated flow: dots travel source -> target along each drawn edge. Speed (px/s) follows the mean transfer size
+// on a log scale, the number of dots follows the transfer count. It encodes volume; it is not a replay in time.
+const FLOW_MAX_DOTS = 4000, FLOW_V_MIN = 22, FLOW_V_MAX = 170;
+function flowPrepare() {
+  const ms = [];
+  graph.forEachEdge((e, a) => { if (a.value > 0 && a.n > 0) ms.push(Math.log10(a.value / a.n)); });
+  ms.sort((x, y) => x - y);
+  const lo = ms.length ? ms[Math.floor(ms.length * 0.05)] : 0, hi = ms.length ? ms[Math.floor(ms.length * 0.95)] : 1;
+  return { lo, span: Math.max(hi - lo, 1e-6) };
+}
+function flowDot(e, a, sc, i) {
+  const t = a.value > 0 && a.n > 0 ? Math.min(1, Math.max(0, (Math.log10(a.value / a.n) - sc.lo) / sc.span)) : 0.5;
+  let h = 0; for (let k = 0; k < e.length; k++) h = (h * 31 + e.charCodeAt(k)) >>> 0;
+  return { v: FLOW_V_MIN + t * (FLOW_V_MAX - FLOW_V_MIN), k: Math.max(1, Math.min(5, Math.round(1 + Math.log2(a.n || 1) / 2))), off: (h % 1000) / 1000 };
+}
+function startFlow() {
+  cancelAnimationFrame(flowRaf); flowRaf = 0;
+  const cv = $("flow"), ctx = cv.getContext("2d");
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  if (!animOn || !renderer || !graph) return;
+  const sc = flowPrepare(), cache = new Map(), t0 = performance.now();
+  const frame = (now) => {
+    if (!animOn || !renderer || !graph) return;
+    const dpr = devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
+    if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = css("--edge-hi");
+    const secs = (now - t0) / 1000, list = [];
+    graph.forEachEdge((e, a, s, t, sa, ta) => {
+      if (renderer.getEdgeDisplayData(e)?.hidden) return;
+      list.push([e, a, s, t]);
+    });
+    const budget = Math.max(1, Math.floor(FLOW_MAX_DOTS / Math.max(1, list.length)));
+    for (const [e, a, s, t] of list) {
+      const p = renderer.graphToViewport(graph.getNodeAttributes(s)), q = renderer.graphToViewport(graph.getNodeAttributes(t));
+      const dx = q.x - p.x, dy = q.y - p.y, len = Math.hypot(dx, dy);
+      if (len < 12 || (p.x < -50 && q.x < -50) || (p.x > w + 50 && q.x > w + 50) || (p.y < -50 && q.y < -50) || (p.y > h + 50 && q.y > h + 50)) continue;
+      let d = cache.get(e); if (!d) cache.set(e, d = flowDot(e, a, sc));
+      const k = Math.min(d.k, budget), r = 1.6 + d.v / FLOW_V_MAX * 1.2;
+      for (let i = 0; i < k; i++) {
+        const f = (secs * d.v / len + i / k + d.off) % 1;
+        const fade = Math.min(1, f / 0.1, (1 - f) / 0.1);
+        ctx.globalAlpha = 0.25 + 0.7 * fade;
+        ctx.beginPath(); ctx.arc(p.x + dx * f, p.y + dy * f, r, 0, 6.2832); ctx.fill();
+      }
+    }
+    ctx.globalAlpha = 1;
+    flowRaf = requestAnimationFrame(frame);
+  };
+  flowRaf = requestAnimationFrame(frame);
+}
+
+function note() {
+  if (!graph) return;
+  const at = graph.getAttributes(), bbN = at.n_backbone_edges, hiddenEdges = at.n_hidden_edges;
+  const drawn = state.all || bbN == null ? graph.size : bbN;
+  $("note").textContent = `${graph.order} nodes · ${drawn.toLocaleString()} edges`
+    + (!state.all && bbN != null && bbN < graph.size ? ` · ${(graph.size - bbN).toLocaleString()} weaker edges hidden` : "")
+    + (hiddenEdges ? ` · ${hiddenEdges.toLocaleString()} lighter edges not loaded` : "");
+}
+
+function crumbs() {
+  const el = $("crumbs"), parts = [], s = state;
+  const btn = (text, fn) => { const b = document.createElement("button"); b.textContent = text; b.onclick = fn; return b; };
+  parts.push(document.createTextNode(`${s.month} › ${s.label} › `));
+  if (s.view === "community" || (s.view === "ego" && s.from)) {
+    parts.push(btn("Community map", () => navigate({ view: "communities", comm: undefined, centre: undefined, from: undefined })));
+    if (s.view === "community") parts.push(document.createTextNode(` › ${s.commName || s.comm}`));
+    else {
+      parts.push(document.createTextNode(" › "));
+      parts.push(btn(s.from.name || s.from.comm, () => navigate({ view: "community", comm: s.from.comm, centre: undefined, from: undefined })));
+      parts.push(document.createTextNode(` › ${(s.centre || "").slice(0, 10)}…`));
+    }
+  } else {
+    const names = { backbone: "Backbone", communities: "Community map", ego: "Ego view", loops: "Loops over time" };
+    parts.push(document.createTextNode(names[s.view] + (s.view === "ego" && s.centre ? ` › ${s.centre.slice(0, 10)}…` : "")));
+  }
+  el.replaceChildren(...parts);
+}
+
+function navigate(change) {
+  Object.assign(state, change);
+  $("view").value = state.view;
+  render(true);
+}
+
+function openCommunity(node) {
+  const a = graph.getNodeAttributes(node);
+  navigate({ view: "community", comm: node, commName: a.name, centre: undefined, from: undefined });
 }
 
 function panel(node) {
@@ -189,10 +318,15 @@ function panel(node) {
   const top = graph.edges(node).map(e => [e, graph.getEdgeAttributes(e)]).sort((x, y) => (y[1].n || 0) - (x[1].n || 0)).slice(0, 5);
   const tx = top.flatMap(([e, ea]) => (ea.hashes || []).slice(0, 1).map(h =>
     `<li><a href="${EXPLORER}${h}" target="_blank" rel="noopener"><code>${h.slice(0, 12)}…</code></a> ${graph.source(e) === node ? "to" : "from"} <code>${(graph.source(e) === node ? graph.target(e) : graph.source(e)).slice(0, 8)}</code></li>`));
-  $("panel").innerHTML = `<h2>${kind === "communities" ? a.label : `<code>${node}</code>`}</h2><dl>${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v ?? "–"}</dd>`).join("")}</dl>`
+  $("panel").innerHTML = `<h2>${kind === "communities" ? (a.name || a.label) : `<code>${node}</code>`}</h2>`
+    + (kind === "communities" && a.summary ? `<p class="summary">${a.summary}</p>` : "")
+    + (kind === "communities" && a.detail ? `<p class="hint">${a.detail}</p>` : "")
+    + `<dl>${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v ?? "–"}</dd>`).join("")}</dl>`
     + (kind !== "communities" ? `<button id="egobtn">Open ego view</button>` : "")
+    + (kind === "communities" && a.has_detail ? `<button id="commbtn">Open community</button>` : "")
     + (tx.length ? `<p class="hint">Sample transactions on its biggest edges:</p><ul class="mono">${tx.join("")}</ul>` : "");
   const b = $("egobtn"); if (b) b.onclick = () => openEgo(node);
+  const cb = $("commbtn"); if (cb) cb.onclick = () => openCommunity(node);
 }
 
 function openEgo(centre) {
@@ -201,11 +335,13 @@ function openEgo(centre) {
     $("panel").insertAdjacentHTML("beforeend", `<p class="hint">No precomputed ego view for this entity. Build one with<br><code>uv run graph/run.py ego ${centre} --month ${state.month} --asset ${state.label.split("-")[0]}</code></p>`);
     return;
   }
-  state.view = "ego"; state.centre = centre; $("view").value = "ego"; render();
+  const from = state.view === "community" ? { comm: state.comm, name: state.commName } : undefined;
+  navigate({ view: "ego", centre, from });
 }
 
-async function render() {
-  writeHash();
+async function render(push) {
+  writeHash(push);
+  crumbs();
   const loops = state.view === "loops";
   $("loops").style.display = loops ? "block" : "none";
   $("stage").style.display = $("panel").style.display = loops ? "none" : "";
@@ -216,13 +352,28 @@ async function render() {
     $("egolist").innerHTML = egos.map(x => `<option value="${x.centre}">`).join("");
     v = egos.find(x => x.centre === state.centre) || egos[0];
     if (v) state.centre = v.centre;
+  } else if (state.view === "community") {
+    v = INDEX.views.find(x => x.kind === "community_detail" && x.month === state.month && x.label === state.label);
+    if (v) {
+      if (!bundles.has(v.file)) bundles.set(v.file, await (await fetch("graph/" + v.file)).json());
+      const b = bundles.get(v.file).communities;
+      if (!state.comm || !b[state.comm]) state.comm = Object.keys(b)[0];
+      const data = b[state.comm];
+      state.commName = data.attributes.name || state.comm;
+      draw(data);
+      $("panel").innerHTML = `<h2>${state.commName}</h2>` + (data.attributes.summary ? `<p class="summary">${data.attributes.summary}</p>` : "")
+        + `<p class="hint">The ${graph.order} entities most strongly tied to <code>${state.commName.split(" · ")[1] || ""}</code> inside this community, with its significant edges. Hover a node to see its neighbours; click it for details.</p>`;
+      writeHash(); crumbs();
+      return;
+    }
   } else {
     v = INDEX.views.find(x => x.kind === state.view && x.month === state.month && x.label === state.label);
   }
-  if (!v) { if (renderer) renderer.kill(); renderer = null; $("note").textContent = "No view for this month and asset."; return; }
+  if (!v) { if (renderer) renderer.kill(); renderer = null; graph = null; $("note").textContent = "No view for this month and asset."; return; }
   const data = await (await fetch("graph/" + v.file)).json();
   draw(data);
-  writeHash();
+  if (state.view !== "ego") $("panel").innerHTML = '<p class="hint">Hover a node to see its neighbours. Click it for details' + (state.view === "communities" ? ", or to open the community." : " and sample transactions.") + "</p>";
+  writeHash(); crumbs();
 }
 
 async function drawLoops() {
@@ -269,21 +420,40 @@ function fillSelects() {
   $("month").innerHTML = months.map(m => `<option>${m}</option>`).join("");
   $("asset").innerHTML = labels.map(l => `<option>${l}</option>`).join("");
   const h = readHash();
-  state = { view: h.view || "backbone", month: months.includes(h.month) ? h.month : months[months.length - 1],
-            label: labels.includes(h.label) ? h.label : labels[0], centre: h.centre, colour: "role", minw: 0 };
-  $("month").value = state.month; $("asset").value = state.label; $("view").value = state.view;
+  const views = ["backbone", "communities", "community", "ego", "loops"];
+  state = { view: views.includes(h.view) ? h.view : "backbone", month: months.includes(h.month) ? h.month : months[months.length - 1],
+            label: labels.includes(h.label) ? h.label : labels[0], centre: h.view === "ego" ? h.arg : undefined,
+            comm: h.view === "community" ? h.arg : undefined, all: h.all, colour: "role", minw: 0 };
+  $("month").value = state.month; $("asset").value = state.label; $("view").value = state.view; $("alledges").checked = !!state.all;
 }
 
 for (const id of ["month", "asset", "view"]) $(id).addEventListener("change", (e) => {
-  state[id === "asset" ? "label" : id] = e.target.value; if (id !== "view") state.centre = undefined; render(); });
+  state[id === "asset" ? "label" : id] = e.target.value;
+  if (id !== "view") { state.centre = undefined; state.comm = undefined; }
+  state.from = undefined;
+  render(true); });
+$("alledges").addEventListener("change", (e) => { state.all = e.target.checked; writeHash(); if (renderer) { renderer.refresh(); note(); } });
+window.addEventListener("popstate", () => {
+  const h = readHash();
+  if (!h.view) return;
+  Object.assign(state, { view: h.view, month: h.month || state.month, label: h.label || state.label,
+    centre: h.view === "ego" ? h.arg : undefined, comm: h.view === "community" ? h.arg : undefined, all: h.all, from: undefined });
+  $("month").value = state.month; $("asset").value = state.label; $("view").value = state.view; $("alledges").checked = !!state.all;
+  render();
+});
+$("animate").checked = animOn;
+$("animate").addEventListener("change", (e) => {
+  animOn = e.target.checked;
+  if (renderer) { renderer.setSetting("defaultEdgeType", animOn ? "line" : "arrow"); renderer.refresh(); legend(); }
+  startFlow();
+});
 $("colour").addEventListener("change", (e) => { state.colour = e.target.value; if (renderer) { renderer.refresh(); legend(); } });
 $("minw").addEventListener("input", (e) => { state.minw = +e.target.value; if (renderer) renderer.refresh(); });
 $("search").addEventListener("change", (e) => {
   const q = e.target.value.trim(); if (!q) return;
   if (graph && graph.hasNode(q) && state.view !== "ego") { panel(q); hovered = q; renderer.refresh(); return; }
-  state.view = "ego"; $("view").value = "ego"; state.centre = q;
   const v = INDEX.views.find(x => x.kind === "ego" && x.month === state.month && x.label === state.label && x.centre === q);
-  if (v) render(); else $("panel").innerHTML = `<p class="hint">No precomputed ego view for <code>${q}</code> in ${state.month}. Accounts inside a grouped entity use the entity id. Build one with<br><code>uv run graph/run.py ego ${q} --month ${state.month}</code></p>`;
+  if (v) navigate({ view: "ego", centre: q, from: undefined }); else $("panel").innerHTML = `<p class="hint">No precomputed ego view for <code>${q}</code> in ${state.month}. Accounts inside a grouped entity use the entity id. Build one with<br><code>uv run graph/run.py ego ${q} --month ${state.month}</code></p>`;
 });
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (renderer) { renderer.refresh(); legend(); } });
 

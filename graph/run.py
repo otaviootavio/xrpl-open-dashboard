@@ -22,7 +22,7 @@ from pathlib import Path
 import duckdb
 
 import common
-from common import ALL, DATA, GRAPH_VERSION, RLUSD, Paths, asset_label, connect, edge_months, peak_rss_mb, prev_month, q
+from common import ALL, DATA, GRAPH_VERSION, RLUSD, VIEWS_VERSION, Paths, asset_label, connect, edge_months, peak_rss_mb, prev_month, q
 
 log = logging.getLogger("graph")
 REPORT = Path(__file__).resolve().parent.parent / "report"
@@ -56,11 +56,16 @@ def state(p: Paths) -> duckdb.DuckDBPyConnection:
     return st
 
 
+def step_version(step: str) -> str:
+    """The version a step's output depends on: views also has its own, so view changes skip entities/metrics."""
+    return f"{GRAPH_VERSION}+views{VIEWS_VERSION}" if step == "views" else GRAPH_VERSION
+
+
 def run_step(con, st, p: Paths, step: str, month: str, force: bool) -> None:
     fp = fingerprint(con, p, step, month)
     done = st.execute("SELECT fingerprint, graph_version FROM graph_parts WHERE step = ? AND month = ?",
                       [step, month]).fetchone()
-    if done and done == (fp, GRAPH_VERSION) and not force:
+    if done and done == (fp, step_version(step)) and not force:
         log.info("%s %s: unchanged, skipped", month, step)
         return
     t = time.time()
@@ -78,7 +83,7 @@ def run_step(con, st, p: Paths, step: str, month: str, force: bool) -> None:
         views.build_loops(con, p, out)
     common.check_rss(f"{month} {step}")
     st.execute("INSERT OR REPLACE INTO graph_parts VALUES (?, ?, ?, ?, ?, ?, ?, now())",
-               [step, month, fp, GRAPH_VERSION, round(time.time() - t, 1), peak_rss_mb(), common.dumps(detail)])
+               [step, month, fp, step_version(step), round(time.time() - t, 1), peak_rss_mb(), common.dumps(detail)])
     log.info("%s %s: done in %.1f s, peak RSS %d MB: %s", month, step, time.time() - t, peak_rss_mb(), detail)
 
 
